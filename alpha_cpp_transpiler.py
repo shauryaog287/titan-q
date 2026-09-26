@@ -1,0 +1,1740 @@
+"""
+alpha_cpp_transpiler.py
+=======================
+
+Phase 25: A faithful transpiler from a numeric subset of Python to C++17.
+
+    Python source -> ast -> typed tree walk -> C++17 -> g++ -O3
+
+THE GIL IS NOT THE PROBLEM IT IS USUALLY SAID TO BE
+---------------------------------------------------
+The Global Interpreter Lock stops two threads from executing Python bytecode
+at once. It limits multi-threaded throughput; it has nothing to do with the
+latency of a single-threaded signal function, which never contends for it.
+What makes that function slow is INTERPRETATION: every float is a heap object,
+every operator a dynamic dispatch, every temporary a reference-count update.
+Compiling removes that. The speedups measured below are the cost of
+interpretation, and the GIL plays no part in them.
+
+FAITHFULNESS BEFORE SPEED
+-------------------------
+A transpiler that silently changes a trading signal is worse than a slow one.
+The obvious C++ spelling of Python is wrong in many places:
+
+    Python                  obvious C++           actual Python semantics
+    -7 // 2  = -4           -7 / 2   = -3         floor, not truncation
+    -7 %  3  =  2           -7 %  3  = -1         sign of the divisor
+    1 // 0.1 = 9.0          floor(1/0.1) = 10     CPython's float_divmod
+    round(2.5) = 2          std::round = 3        round half to even
+    xs[-1]                  xs[-1]  (UB)          index from the end
+    sum(xs)  (3.12+)        s += x                Neumaier compensated sum
+    1.0 / 0.0               inf                   ZeroDivisionError
+    math.log(0.0)           -inf                  ValueError
+    10.0 ** 400             inf                   OverflowError
+    f(x) + g(x)             either order          strictly left to right
+
+Every one is handled, and the output is checked by compiling it and running it
+against the Python original on thousands of inputs -- bit for bit, including
+which exception is raised. Where C++ cannot represent a Python value (an
+integer beyond 64 bits) the generated code raises OverflowError: it fails loud,
+never wraps silently.
+
+THE SUBSET
+----------
+Typed functions over float, int, bool, list[float], list[int]: arithmetic,
+comparisons (chained), if/elif/else, for over range() or a list, while, break,
+continue, len, sum, abs, min, max, float, int, round, math.{sqrt, exp, log,
+floor, ceil, fabs}, list [c] * n, slices, append, and calls between transpiled
+functions. Anything else is REJECTED with a TranspileError naming the
+construct. The transpiler never guesses.
+"""
+
+from __future__ import annotations
+
+import ast
+import math
+import os
+import random
+import struct
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+import timeit
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+__all__ = ["Ty", "TranspileError", "Transpiler", "transpile", "compile_cpp",
+           "differential_test", "PRELUDE"]
+
+
+# ===========================================================================
+# 1. TYPES
+# ===========================================================================
+
+class TranspileError(Exception):
+    """Raised for anything outside the supported subset. Always names the construct."""
+
+
+class Ty(Enum):
+    INT = "int64_t"
+    FLOAT = "double"
+    BOOL = "bool"
+    LFLOAT = "std::vector<double>"
+    LINT = "std::vector<int64_t>"
+
+    @property
+    def is_list(self) -> bool:
+        return self in (Ty.LFLOAT, Ty.LINT)
+
+    @property
+    def is_num(self) -> bool:
+        return self in (Ty.INT, Ty.FLOAT)
+
+    @property
+    def elem(self) -> "Ty":
+        return {Ty.LFLOAT: Ty.FLOAT, Ty.LINT: Ty.INT}[self]
+
+
+CPP_KEYWORDS = set("""alignas alignof and and_eq asm auto bitand bitor bool break case catch char
+char8_t char16_t char32_t class compl concept const consteval constexpr constinit const_cast
+continue co_await co_return co_yield decltype default delete do double dynamic_cast else enum
+explicit export extern false float for friend goto if inline int long mutable namespace new
+noexcept not not_eq nullptr operator or or_eq private protected public register
+reinterpret_cast requires return short signed sizeof static static_assert static_cast struct
+switch template this thread_local throw true try typedef typeid typename union unsigned using
+virtual void volatile wchar_t while xor xor_eq main std py alpha NULL""".split())
+
+
+def _ident(name: str) -> str:
+    if name.startswith("_py_"):
+        raise TranspileError(f"identifier {name!r} uses the reserved prefix _py_")
+    return name + "_" if name in CPP_KEYWORDS else name
+
+
+# ===========================================================================
+# 2. THE C++ RUNTIME PRELUDE
+# ===========================================================================
+
+PRELUDE = r"""// ---------------------------------------------------------------------------
+// Generated by alpha_cpp_transpiler.py. Python semantics, replicated exactly.
+// Compile: g++ -O3 -std=c++17   Do NOT add -ffast-math: it optimises away the
+// compensation in sum() and reorders arithmetic. With -march=native ALSO pass
+// -ffp-contract=off: GCC fuses a*b + c into an FMA in every C++ mode otherwise.
+// ---------------------------------------------------------------------------
+#include <vector>
+#include <cmath>
+#include <cstdint>
+#include <cstddef>
+#include <stdexcept>
+#include <algorithm>
+
+namespace py {
+
+struct Error : std::runtime_error {
+    explicit Error(const char* m) : std::runtime_error(m) {}
+    virtual const char* kind() const noexcept = 0;
+};
+#define PY_DEFINE_ERROR(NAME)                                                  \
+    struct NAME final : Error {                                                \
+        explicit NAME(const char* m) : Error(m) {}                             \
+        const char* kind() const noexcept override { return #NAME; }           \
+    };
+PY_DEFINE_ERROR(ZeroDivisionError)
+PY_DEFINE_ERROR(IndexError)
+PY_DEFINE_ERROR(ValueError)
+PY_DEFINE_ERROR(OverflowError)
+#undef PY_DEFINE_ERROR
+#define PY_UNLIKELY(x) __builtin_expect(!!(x), 0)
+
+// -- int64 arithmetic: Python ints are unbounded; overflow must be loud -------
+inline int64_t iadd(int64_t a, int64_t b) {
+    int64_t r;
+    if (PY_UNLIKELY(__builtin_add_overflow(a, b, &r))) {
+        throw OverflowError("int64 overflow");
+    }
+    return r;
+}
+inline int64_t isub(int64_t a, int64_t b) {
+    int64_t r;
+    if (PY_UNLIKELY(__builtin_sub_overflow(a, b, &r))) {
+        throw OverflowError("int64 overflow");
+    }
+    return r;
+}
+inline int64_t imul(int64_t a, int64_t b) {
+    int64_t r;
+    if (PY_UNLIKELY(__builtin_mul_overflow(a, b, &r))) {
+        throw OverflowError("int64 overflow");
+    }
+    return r;
+}
+inline int64_t ineg(int64_t a) {
+    if (PY_UNLIKELY(a == INT64_MIN)) {
+        throw OverflowError("int64 overflow");
+    }
+    return -a;
+}
+inline int64_t iabs(int64_t a) { return a < 0 ? ineg(a) : a; }
+// floor division and modulo: Python floors toward -inf, C++ truncates toward 0
+inline int64_t floordiv(int64_t a, int64_t b) {
+    if (PY_UNLIKELY(b == 0)) throw ZeroDivisionError("integer division or modulo by zero");
+    if (PY_UNLIKELY(a == INT64_MIN && b == -1)) throw OverflowError("int64 overflow");
+    int64_t q = a / b, r = a % b;
+    if (r != 0 && ((r < 0) != (b < 0))) --q;
+    return q;
+}
+inline int64_t mod(int64_t a, int64_t b) {
+    if (PY_UNLIKELY(b == 0)) throw ZeroDivisionError("integer division or modulo by zero");
+    if (b == -1) return 0;
+    int64_t r = a % b;
+    if (r != 0 && ((r < 0) != (b < 0))) r += b;
+    return r;
+}
+inline int64_t ipow(int64_t b, int64_t e) {            // e >= 0, checked at transpile time
+    int64_t r = 1;
+    for (;;) {
+        if (e & 1) r = imul(r, b);
+        e >>= 1;
+        if (!e) break;
+        b = imul(b, b);
+    }
+    return r;
+}
+
+// -- float division: Python raises on a zero divisor ---------------------------
+inline double truediv(double a, double b) {
+    if (PY_UNLIKELY(b == 0.0)) throw ZeroDivisionError("division by zero");
+    return a / b;
+}
+// CPython Objects/floatobject.c _float_div_mod, line for line
+inline double ffloordiv(double vx, double wx) {
+    if (PY_UNLIKELY(wx == 0.0)) throw ZeroDivisionError("float floor division by zero");
+    double m = std::fmod(vx, wx);
+    double div = (vx - m) / wx;
+    if (m != 0.0) {
+        if ((wx < 0) != (m < 0)) { m += wx; div -= 1.0; }
+    }
+    double fd;
+    if (div != 0.0) {
+        fd = std::floor(div);
+        if (div - fd > 0.5) fd += 1.0;
+    } else {
+        fd = std::copysign(0.0, vx / wx);
+    }
+    return fd;
+}
+// CPython float_rem
+inline double fmod(double vx, double wx) {
+    if (PY_UNLIKELY(wx == 0.0)) throw ZeroDivisionError("float modulo by zero");
+    double m = std::fmod(vx, wx);
+    if (m != 0.0) { if ((wx < 0) != (m < 0)) m += wx; }
+    else m = std::copysign(0.0, wx);
+    return m;
+}
+// CPython float_pow: every special case in CPython's order, then libm pow
+inline bool is_odd_integer(double x) { return std::fmod(std::fabs(x), 2.0) == 1.0; }
+inline double fpow(double iv, double iw) {
+    if (iw == 0.0) return 1.0;
+    if (std::isnan(iv)) return iv;
+    if (std::isnan(iw)) return iv == 1.0 ? 1.0 : iw;
+    if (std::isinf(iw)) {
+        double a = std::fabs(iv);
+        if (a == 1.0) return 1.0;
+        if ((iw > 0.0) == (a > 1.0)) return std::fabs(iw);
+        return 0.0;
+    }
+    if (std::isinf(iv)) {
+        bool odd = is_odd_integer(iw);
+        if (iw > 0.0) return odd ? iv : std::fabs(iv);
+        return odd ? std::copysign(0.0, iv) : 0.0;
+    }
+    if (iv == 0.0) {
+        bool odd = is_odd_integer(iw);
+        if (PY_UNLIKELY(iw < 0.0)) throw ZeroDivisionError("0.0 cannot be raised to a negative power");
+        return odd ? iv : 0.0;
+    }
+    bool negate = false;
+    if (iv < 0.0) {
+        if (PY_UNLIKELY(iw != std::floor(iw)))
+            throw ValueError("negative base to a fractional power is complex in Python");
+        iv = -iv;
+        negate = is_odd_integer(iw);
+    }
+    if (iv == 1.0) return negate ? -1.0 : 1.0;
+    double r = std::pow(iv, iw);
+    if (PY_UNLIKELY(std::isinf(r))) throw OverflowError("(34, 'Numerical result out of range')");
+    return negate ? -r : r;
+}
+
+// -- math module: CPython math_1 error semantics ------------------------------
+inline double sqrt(double x) {
+    if (PY_UNLIKELY(x < 0.0)) throw ValueError("math domain error");
+    return std::sqrt(x);
+}
+inline double log(double x) {
+    if (std::isnan(x)) return x;
+    if (PY_UNLIKELY(x <= 0.0)) throw ValueError("math domain error");
+    return std::log(x);
+}
+inline double exp(double x) {
+    double r = std::exp(x);
+    if (PY_UNLIKELY(std::isinf(r) && std::isfinite(x))) throw OverflowError("math range error");
+    return r;
+}
+inline int64_t to_int(double x) {                      // PyLong_FromDouble on an integral value
+    if (PY_UNLIKELY(std::isnan(x))) throw ValueError("cannot convert float NaN to integer");
+    if (PY_UNLIKELY(std::isinf(x))) throw OverflowError("cannot convert float infinity to integer");
+    if (PY_UNLIKELY(x < -9223372036854775808.0 || x >= 9223372036854775808.0))
+        throw OverflowError("int64 overflow");
+    return static_cast<int64_t>(x);
+}
+inline int64_t floor_i(double x) { return to_int(std::floor(x)); }
+inline int64_t ceil_i(double x)  { return to_int(std::ceil(x)); }
+inline int64_t trunc_i(double x) { return to_int(std::trunc(x)); }
+inline int64_t round_i(double x) {                     // round half to even
+    if (PY_UNLIKELY(std::isnan(x) || std::isinf(x))) return to_int(x);
+    double r = std::round(x);
+    if (std::fabs(x - r) == 0.5) r = 2.0 * std::round(x / 2.0);
+    return to_int(r);
+}
+
+// -- lists ------------------------------------------------------------------
+template <class T> inline const T& at(const std::vector<T>& v, int64_t i) {
+    int64_t n = static_cast<int64_t>(v.size());
+    if (i < 0) i += n;
+    if (PY_UNLIKELY(i < 0 || i >= n)) throw IndexError("list index out of range");
+    return v[static_cast<std::size_t>(i)];
+}
+template <class T> inline T& at_mut(std::vector<T>& v, int64_t i) {
+    int64_t n = static_cast<int64_t>(v.size());
+    if (i < 0) i += n;
+    if (PY_UNLIKELY(i < 0 || i >= n)) throw IndexError("list assignment index out of range");
+    return v[static_cast<std::size_t>(i)];
+}
+struct Range { int64_t a, b; };
+// PySlice_AdjustIndices for step 1
+inline Range sl(int64_t n, bool has_lo, int64_t lo, bool has_hi, int64_t hi) {
+    int64_t a = 0, b = n;
+    if (has_lo) { a = lo; if (a < 0) { a += n; if (a < 0) a = 0; } else if (a > n) a = n; }
+    if (has_hi) { b = hi; if (b < 0) { b += n; if (b < 0) b = 0; } else if (b > n) b = n; }
+    if (b < a) b = a;
+    return Range{a, b};
+}
+inline int64_t len(Range r) { return r.b - r.a; }
+template <class T> inline Range all(const std::vector<T>& v) { return Range{0, static_cast<int64_t>(v.size())}; }
+// builtin sum() over floats, Python 3.12+: Neumaier compensated summation
+inline double sum(const std::vector<double>& v, Range r) {
+    double f = 0.0, c = 0.0;
+    for (int64_t i = r.a; i < r.b; ++i) {
+        double x = v[static_cast<std::size_t>(i)];
+        double t = f + x;
+        if (std::fabs(f) >= std::fabs(x)) c += (f - t) + x;
+        else c += (x - t) + f;
+        f = t;
+    }
+    if (c != 0.0 && std::isfinite(c)) f += c;
+    return f;
+}
+inline int64_t sum(const std::vector<int64_t>& v, Range r) {
+    int64_t s = 0;
+    for (int64_t i = r.a; i < r.b; ++i) s = iadd(s, v[static_cast<std::size_t>(i)]);
+    return s;
+}
+template <class T> inline T min(const std::vector<T>& v, Range r) {
+    if (PY_UNLIKELY(r.b <= r.a)) throw ValueError("min() arg is an empty sequence");
+    T m = v[static_cast<std::size_t>(r.a)];
+    for (int64_t i = r.a + 1; i < r.b; ++i) { T x = v[static_cast<std::size_t>(i)]; if (x < m) m = x; }
+    return m;
+}
+template <class T> inline T max(const std::vector<T>& v, Range r) {
+    if (PY_UNLIKELY(r.b <= r.a)) throw ValueError("max() arg is an empty sequence");
+    T m = v[static_cast<std::size_t>(r.a)];
+    for (int64_t i = r.a + 1; i < r.b; ++i) { T x = v[static_cast<std::size_t>(i)]; if (x > m) m = x; }
+    return m;
+}
+template <class T> inline std::vector<T> slice(const std::vector<T>& v, Range r) {
+    return std::vector<T>(v.begin() + r.a, v.begin() + r.b);
+}
+template <class T> inline std::vector<T> repeat(T value, int64_t n) {  // [value] * n
+    return std::vector<T>(static_cast<std::size_t>(n > 0 ? n : 0), value);
+}
+
+}  // namespace py
+"""
+
+
+# ===========================================================================
+# 3. THE TRANSPILER
+# ===========================================================================
+
+@dataclass
+class Sig:
+    name: str
+    params: List[Tuple[str, Ty]]
+    ret: Ty
+    mutated: set = field(default_factory=set)
+
+    def param_decl(self, name: str, ty: Ty) -> str:
+        if ty.is_list:
+            return f"{'' if name in self.mutated else 'const '}{ty.value}& {_ident(name)}"
+        return f"{ty.value} {_ident(name)}"
+
+
+@dataclass
+class E:
+    """An emitted expression: C++ code, its type, and whether evaluating it can throw."""
+    code: str
+    ty: Ty
+    throws: bool = False
+
+
+_BINOPS = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.FloorDiv: "//",
+           ast.Mod: "%", ast.Pow: "**"}
+_CMPOPS = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=", ast.Eq: "==", ast.NotEq: "!="}
+
+
+def _annotation(node: ast.AST) -> Ty:
+    if isinstance(node, ast.Name):
+        m = {"float": Ty.FLOAT, "int": Ty.INT, "bool": Ty.BOOL}
+        if node.id in m:
+            return m[node.id]
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+            and node.value.id == "list" and isinstance(node.slice, ast.Name)):
+        if node.slice.id == "float":
+            return Ty.LFLOAT
+        if node.slice.id == "int":
+            return Ty.LINT
+    raise TranspileError(f"unsupported type annotation: {ast.unparse(node)}")
+
+
+class _FnEmitter:
+    def __init__(self, sig: Sig, sigs: Dict[str, Sig], fn: ast.FunctionDef) -> None:
+        self.sig, self.sigs, self.fn = sig, sigs, fn
+        self.env: Dict[str, Ty] = dict(sig.params)
+        self.params = {n for n, _ in sig.params}
+        self.decls: Dict[str, Ty] = {}
+        self.tmp = 0
+        self.loop_depth = 0
+
+    # -- helpers --------------------------------------------------------------
+    def _fresh(self, base: str) -> str:
+        self.tmp += 1
+        return f"_py_{base}{self.tmp}"
+
+    def _declare(self, name: str, ty: Ty, node: ast.AST) -> None:
+        if name in self.env:
+            if self.env[name] != ty:
+                raise TranspileError(
+                    f"line {node.lineno}: {name!r} changes type from {self.env[name].name} "
+                    f"to {ty.name}; the subset requires one type per name (write 0.0, not 0)")
+            return
+        self.env[name] = ty
+        self.decls[name] = ty
+
+    @staticmethod
+    def _cast(e: E, to: Ty) -> E:
+        if e.ty == to:
+            return e
+        if e.ty == Ty.INT and to == Ty.FLOAT:
+            return E(f"static_cast<double>({e.code})", Ty.FLOAT, e.throws)
+        raise TranspileError(f"cannot use a {e.ty.name} where a {to.name} is required")
+
+    def _seq(self, parts: List[E], ret: Ty, combine: Callable[[List[str]], str]) -> E:
+        """
+        Python evaluates operands strictly left to right; C++ leaves the order of
+        a binary operator's operands unspecified. When more than one operand can
+        throw, WHICH exception surfaces depends on that order -- so sequence them
+        through named temporaries in an immediately-invoked lambda. The lambda
+        inlines away at -O3.
+        """
+        if sum(p.throws for p in parts) <= 1:
+            return E(combine([p.code for p in parts]), ret, any(p.throws for p in parts))
+        names = [self._fresh("t") for _ in parts]
+        body = " ".join(f"const {p.ty.value} {n} = {p.code};" for n, p in zip(names, parts))
+        return E(f"([&]() -> {ret.value} {{ {body} return {combine(names)}; }}())", ret, True)
+
+    # -- expressions --------------------------------------------------------
+    def expr(self, n: ast.AST) -> E:
+        if isinstance(n, ast.Constant):
+            v = n.value
+            if isinstance(v, bool):
+                return E("true" if v else "false", Ty.BOOL)
+            if isinstance(v, int):
+                if not -(2**63) <= v < 2**63:
+                    raise TranspileError(f"line {n.lineno}: integer literal {v} exceeds int64")
+                return E(str(v) if -(2**31) < v < 2**31 else f"INT64_C({v})", Ty.INT)
+            if isinstance(v, float):
+                if not math.isfinite(v):
+                    raise TranspileError(f"line {n.lineno}: non-finite float literal")
+                r = repr(v)
+                return E(r if any(c in r for c in ".e") else r + ".0", Ty.FLOAT)
+            raise TranspileError(f"line {n.lineno}: unsupported constant {v!r}")
+        if isinstance(n, ast.Name):
+            if n.id not in self.env:
+                raise TranspileError(f"line {n.lineno}: {n.id!r} used before assignment")
+            return E(_ident(n.id), self.env[n.id])
+        if isinstance(n, ast.UnaryOp):
+            if isinstance(n.op, ast.USub) and isinstance(n.operand, ast.Constant) \
+                    and type(n.operand.value) in (int, float):
+                return self.expr(ast.copy_location(ast.Constant(-n.operand.value), n))
+            if isinstance(n.op, ast.Not):
+                c = self.cond(n.operand)
+                return E(f"(!{c.code})", Ty.BOOL, c.throws)
+            e = self.expr(n.operand)
+            if not e.ty.is_num:
+                raise TranspileError(f"line {n.lineno}: unary operator on {e.ty.name}")
+            if isinstance(n.op, ast.UAdd):
+                return e
+            if isinstance(n.op, ast.USub):
+                return E(f"py::ineg({e.code})", Ty.INT, True) if e.ty == Ty.INT \
+                    else E(f"(-{e.code})", Ty.FLOAT, e.throws)
+            raise TranspileError(f"line {n.lineno}: unsupported unary operator")
+        if isinstance(n, ast.BinOp):
+            if isinstance(n.op, ast.Mult):
+                rep = self._try_repeat(n)
+                if rep is not None:
+                    return rep
+            return self.binop(self.expr(n.left), n.op, self.expr(n.right), n)
+        if isinstance(n, ast.Compare):
+            return self.compare(n)
+        if isinstance(n, ast.BoolOp):
+            parts = [self.expr(v) for v in n.values]
+            if any(p.ty != Ty.BOOL for p in parts):
+                raise TranspileError(
+                    f"line {n.lineno}: 'and'/'or' on non-bool values returns an operand in "
+                    f"Python, not a bool; only bool operands are supported outside conditions")
+            op = " && " if isinstance(n.op, ast.And) else " || "
+            return E("(" + op.join(p.code for p in parts) + ")", Ty.BOOL, any(p.throws for p in parts))
+        if isinstance(n, ast.IfExp):
+            c = self.cond(n.test)
+            a, b = self.expr(n.body), self.expr(n.orelse)
+            ty = a.ty if a.ty == b.ty else Ty.FLOAT
+            if a.ty != b.ty and not (a.ty.is_num and b.ty.is_num):
+                raise TranspileError(f"line {n.lineno}: conditional branches of different types")
+            a, b = self._cast(a, ty), self._cast(b, ty)
+            return E(f"({c.code} ? {a.code} : {b.code})", ty, c.throws or a.throws or b.throws)
+        if isinstance(n, ast.Call):
+            return self.call(n)
+        if isinstance(n, ast.Subscript):
+            return self.subscript(n)
+        if isinstance(n, ast.List):
+            return self._list_literal(n, None)
+        raise TranspileError(f"line {getattr(n, 'lineno', '?')}: unsupported expression "
+                             f"{type(n).__name__}: {ast.unparse(n)}")
+
+    def _list_literal(self, n: ast.List, want: Optional[Ty]) -> E:
+        items = [self.expr(e) for e in n.elts]
+        if not items:
+            if want is None:
+                raise TranspileError(f"line {n.lineno}: empty list needs a type annotation")
+            return E(f"{want.value}()", want)
+        ety = Ty.FLOAT if any(i.ty == Ty.FLOAT for i in items) else Ty.INT
+        if any(not i.ty.is_num for i in items):
+            raise TranspileError(f"line {n.lineno}: list literals hold numbers only")
+        lty = Ty.LFLOAT if ety == Ty.FLOAT else Ty.LINT
+        if want is not None and want != lty:
+            if want == Ty.LFLOAT:
+                lty, ety = Ty.LFLOAT, Ty.FLOAT
+            else:
+                raise TranspileError(f"line {n.lineno}: list literal does not match {want.name}")
+        items = [self._cast(i, ety) for i in items]
+        return self._seq(items, lty, lambda cs: f"{lty.value}{{{', '.join(cs)}}}")
+
+    def _try_repeat(self, n: ast.BinOp) -> Optional[E]:
+        """[c] * n  or  n * [c]  ->  py::repeat(c, n); a negative count gives [] as in Python."""
+        for lst, cnt in ((n.left, n.right), (n.right, n.left)):
+            if isinstance(lst, ast.List):
+                if len(lst.elts) != 1:
+                    raise TranspileError(f"line {n.lineno}: only single-element [c] * n is supported")
+                v = self.expr(lst.elts[0])
+                k = self._cast(self.expr(cnt), Ty.INT) if self.expr(cnt).ty == Ty.INT else None
+                if k is None:
+                    raise TranspileError(f"line {n.lineno}: list repetition count must be int")
+                lty = Ty.LFLOAT if v.ty == Ty.FLOAT else Ty.LINT
+                return self._seq([v, k], lty, lambda cs: f"py::repeat<{lty.elem.value}>({cs[0]}, {cs[1]})")
+        return None
+
+    def binop(self, l: E, op: ast.operator, r: E, node: ast.AST) -> E:
+        sym = _BINOPS.get(type(op))
+        if sym is None:
+            raise TranspileError(f"line {node.lineno}: unsupported operator {type(op).__name__}")
+        if not (l.ty.is_num and r.ty.is_num):
+            raise TranspileError(f"line {node.lineno}: operator {sym} on {l.ty.name}, {r.ty.name}")
+        both_int = l.ty == Ty.INT and r.ty == Ty.INT
+        if sym == "**":
+            if both_int:
+                lit = _int_literal(node.right) if isinstance(node, ast.BinOp) else None
+                if lit is None:
+                    raise TranspileError(
+                        f"line {node.lineno}: int ** int with a non-literal exponent: the result "
+                        f"type depends on the exponent's sign at runtime")
+                if lit >= 0:
+                    return E(f"py::ipow({l.code}, {r.code})", Ty.INT, True)
+            lf, rf = self._cast(l, Ty.FLOAT), self._cast(r, Ty.FLOAT)
+            return self._seq([lf, rf], Ty.FLOAT, lambda c: f"py::fpow({c[0]}, {c[1]})")._throwing()
+        if sym == "/":
+            lf, rf = self._cast(l, Ty.FLOAT), self._cast(r, Ty.FLOAT)
+            return self._seq([lf, rf], Ty.FLOAT, lambda c: f"py::truediv({c[0]}, {c[1]})")._throwing()
+        if both_int:
+            fn = {"+": "iadd", "-": "isub", "*": "imul", "//": "floordiv", "%": "mod"}[sym]
+            return self._seq([l, r], Ty.INT, lambda c: f"py::{fn}({c[0]}, {c[1]})")._throwing()
+        lf, rf = self._cast(l, Ty.FLOAT), self._cast(r, Ty.FLOAT)
+        if sym in ("//", "%"):
+            fn = "ffloordiv" if sym == "//" else "fmod"
+            return self._seq([lf, rf], Ty.FLOAT, lambda c: f"py::{fn}({c[0]}, {c[1]})")._throwing()
+        return self._seq([lf, rf], Ty.FLOAT, lambda c: f"({c[0]} {sym} {c[1]})")
+
+    def compare(self, n: ast.Compare) -> E:
+        ops = [_CMPOPS.get(type(o)) for o in n.ops]
+        if None in ops:
+            raise TranspileError(f"line {n.lineno}: unsupported comparison "
+                                 f"({', '.join(type(o).__name__ for o in n.ops)})")
+        vals = [self.expr(v) for v in [n.left] + n.comparators]
+        for v in vals:
+            if not v.ty.is_num:
+                raise TranspileError(f"line {n.lineno}: comparison of {v.ty.name}")
+        if len(ops) == 1:
+            return self._seq(vals, Ty.BOOL, lambda c: f"({c[0]} {ops[0]} {c[1]})")
+        # chained: a < b < c  ->  each middle operand evaluated once, short-circuit
+        names = [self._fresh("c") for _ in vals]
+        body = [f"const {vals[0].ty.value} {names[0]} = {vals[0].code};"]
+        for i, o in enumerate(ops):
+            body.append(f"const {vals[i+1].ty.value} {names[i+1]} = {vals[i+1].code};")
+            body.append(f"if (!({names[i]} {o} {names[i+1]})) return false;")
+        return E("([&]() -> bool { " + " ".join(body) + " return true; }())", Ty.BOOL,
+                 any(v.throws for v in vals))
+
+    def cond(self, n: ast.AST) -> E:
+        """Python truthiness, for if/while tests and the operands of and/or/not."""
+        if isinstance(n, ast.BoolOp):
+            parts = [self.cond(v) for v in n.values]
+            op = " && " if isinstance(n.op, ast.And) else " || "
+            return E("(" + op.join(p.code for p in parts) + ")", Ty.BOOL, any(p.throws for p in parts))
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not):
+            c = self.cond(n.operand)
+            return E(f"(!{c.code})", Ty.BOOL, c.throws)
+        e = self.expr(n)
+        if e.ty == Ty.BOOL:
+            return e
+        if e.ty == Ty.INT:
+            return E(f"({e.code} != 0)", Ty.BOOL, e.throws)
+        if e.ty == Ty.FLOAT:
+            return E(f"({e.code} != 0.0)", Ty.BOOL, e.throws)      # nan is truthy, as in Python
+        return E(f"(!{e.code}.empty())", Ty.BOOL, e.throws)
+
+    def _slice_range(self, base: ast.AST, sl: ast.AST) -> Tuple[str, Ty, E]:
+        if not isinstance(base, ast.Name):
+            raise TranspileError("only names can be sliced")
+        v = self.expr(base)
+        if not v.ty.is_list:
+            raise TranspileError(f"slicing a {v.ty.name}")
+        if not isinstance(sl, ast.Slice):
+            raise TranspileError("expected a slice")
+        if sl.step is not None:
+            raise TranspileError("slices with a step are not supported")
+        lo = self._cast(self.expr(sl.lower), Ty.INT) if sl.lower is not None else None
+        hi = self._cast(self.expr(sl.upper), Ty.INT) if sl.upper is not None else None
+        parts = [p for p in (lo, hi) if p is not None]
+
+        def comb(cs: List[str]) -> str:
+            it = iter(cs)
+            a = next(it) if lo is not None else "0"
+            b = next(it) if hi is not None else "0"
+            return (f"py::sl(static_cast<int64_t>({v.code}.size()), "
+                    f"{'true' if lo is not None else 'false'}, {a}, "
+                    f"{'true' if hi is not None else 'false'}, {b})")
+        rng = self._seq(parts, Ty.INT, comb) if parts else E(comb([]), Ty.INT)
+        return v.code, v.ty, rng
+
+    def subscript(self, n: ast.Subscript) -> E:
+        if isinstance(n.slice, ast.Slice):
+            code, lty, rng = self._slice_range(n.value, n.slice)
+            return E(f"py::slice({code}, {rng.code})", lty, rng.throws)
+        v = self.expr(n.value)
+        if not v.ty.is_list or not isinstance(n.value, ast.Name):
+            raise TranspileError(f"line {n.lineno}: indexing requires a list name")
+        i = self.expr(n.slice)
+        if i.ty != Ty.INT:
+            raise TranspileError(f"line {n.lineno}: list index must be int, not {i.ty.name}")
+        return E(f"py::at({v.code}, {i.code})", v.ty.elem, True)
+
+    def _range_arg(self, a: ast.AST) -> Tuple[str, Ty, E]:
+        """A list or slice argument to sum/len/min/max."""
+        if isinstance(a, ast.Subscript) and isinstance(a.slice, ast.Slice):
+            return self._slice_range(a.value, a.slice)
+        v = self.expr(a)
+        if not v.ty.is_list or not isinstance(a, ast.Name):
+            raise TranspileError(f"expected a list name or a slice of one: {ast.unparse(a)}")
+        return v.code, v.ty, E(f"py::all({v.code})", Ty.INT)
+
+    def call(self, n: ast.Call) -> E:
+        if n.keywords:
+            raise TranspileError(f"line {n.lineno}: keyword arguments are not supported")
+        f = n.func
+        if isinstance(f, ast.Attribute):
+            if isinstance(f.value, ast.Name) and f.value.id == "math":
+                if len(n.args) != 1:
+                    raise TranspileError(f"line {n.lineno}: math.{f.attr} takes one argument here")
+                x = self._cast(self.expr(n.args[0]), Ty.FLOAT)
+                table = {"sqrt": ("py::sqrt", Ty.FLOAT, True), "log": ("py::log", Ty.FLOAT, True),
+                         "exp": ("py::exp", Ty.FLOAT, True), "fabs": ("std::fabs", Ty.FLOAT, False),
+                         "floor": ("py::floor_i", Ty.INT, True), "ceil": ("py::ceil_i", Ty.INT, True)}
+                if f.attr not in table:
+                    raise TranspileError(f"line {n.lineno}: math.{f.attr} is not supported")
+                fn, ty, th = table[f.attr]
+                return E(f"{fn}({x.code})", ty, th or x.throws)
+            raise TranspileError(f"line {n.lineno}: unsupported call {ast.unparse(f)}")
+        if not isinstance(f, ast.Name):
+            raise TranspileError(f"line {n.lineno}: unsupported call target")
+        name, args = f.id, n.args
+        if name in ("len", "sum") or (name in ("min", "max") and len(args) == 1):
+            if len(args) != 1:
+                raise TranspileError(f"line {n.lineno}: {name}() takes one argument here")
+            code, lty, rng = self._range_arg(args[0])
+            if name == "len":
+                return E(f"py::len({rng.code})" if "sl(" in rng.code
+                         else f"static_cast<int64_t>({code}.size())", Ty.INT, rng.throws)
+            throws = rng.throws or name in ("min", "max") or lty == Ty.LINT
+            return E(f"py::{name}({code}, {rng.code})", lty.elem, throws)
+        if name in ("min", "max"):
+            vals = [self.expr(a) for a in args]
+            if len({v.ty for v in vals}) != 1 or not vals[0].ty.is_num:
+                raise TranspileError(
+                    f"line {n.lineno}: {name}() of mixed int/float returns whichever argument "
+                    f"wins, so its type is only known at runtime; cast explicitly")
+            # Python: keep the first, replace on strict improvement == std::min/std::max chained
+            stdfn = f"std::{name}<{vals[0].ty.value}>"
+            return self._seq(vals, vals[0].ty,
+                             lambda cs: _chain(stdfn, cs))
+        if name == "abs":
+            x = self.expr(args[0])
+            return E(f"py::iabs({x.code})", Ty.INT, True) if x.ty == Ty.INT \
+                else E(f"std::fabs({x.code})", Ty.FLOAT, x.throws)
+        if name == "float":
+            return self._cast(self.expr(args[0]), Ty.FLOAT)
+        if name == "int":
+            x = self.expr(args[0])
+            return x if x.ty == Ty.INT else E(f"py::trunc_i({x.code})", Ty.INT, True)
+        if name == "round":
+            if len(args) != 1:
+                raise TranspileError(f"line {n.lineno}: round() with ndigits is not supported")
+            x = self._cast(self.expr(args[0]), Ty.FLOAT)
+            return E(f"py::round_i({x.code})", Ty.INT, True)
+        if name in self.sigs:
+            callee = self.sigs[name]
+            if len(args) != len(callee.params):
+                raise TranspileError(f"line {n.lineno}: {name}() takes {len(callee.params)} arguments")
+            vals = []
+            for a, (pn, pty) in zip(args, callee.params):
+                if pty.is_list:
+                    if not isinstance(a, ast.Name):
+                        raise TranspileError(f"line {n.lineno}: pass lists by name")
+                    vals.append(self.expr(a))
+                else:
+                    vals.append(self._cast(self.expr(a), pty))
+            e = self._seq(vals, callee.ret, lambda cs: f"{_ident(name)}({', '.join(cs)})")
+            return E(e.code, e.ty, True)
+        raise TranspileError(f"line {n.lineno}: call to unsupported function {name!r}")
+
+    # -- statements ---------------------------------------------------------------
+    def block(self, stmts: Sequence[ast.stmt], ind: int) -> List[str]:
+        out: List[str] = []
+        for s in stmts:
+            out += self.stmt(s, ind)
+        return out
+
+    def stmt(self, s: ast.stmt, ind: int) -> List[str]:
+        pad = "    " * ind
+        if isinstance(s, ast.Expr):
+            if isinstance(s.value, ast.Constant) and isinstance(s.value.value, str):
+                return []                                               # docstring
+            c = s.value
+            if (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                    and c.func.attr == "append" and isinstance(c.func.value, ast.Name)):
+                lst = self.expr(c.func.value)
+                if not lst.ty.is_list:
+                    raise TranspileError(f"line {s.lineno}: append on {lst.ty.name}")
+                v = self._cast(self.expr(c.args[0]), lst.ty.elem)
+                return [f"{pad}{lst.code}.push_back({v.code});"]
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id in self.sigs:
+                return [f"{pad}{self.call(c).code};"]
+            raise TranspileError(f"line {s.lineno}: expression statement {ast.unparse(s)}")
+        if isinstance(s, ast.Pass):
+            return []
+        if isinstance(s, ast.Return):
+            if s.value is None:
+                raise TranspileError(f"line {s.lineno}: bare return; every function returns a value")
+            if isinstance(s.value, ast.Name) and s.value.id in self.params and self.env[s.value.id].is_list:
+                raise TranspileError(f"line {s.lineno}: returning a list parameter aliases the "
+                                     f"caller's list in Python; C++ would return a copy")
+            e = self._cast(self.expr(s.value), self.sig.ret)
+            return [f"{pad}return {e.code};"]
+        if isinstance(s, (ast.Assign, ast.AnnAssign)):
+            return self.assign(s, pad)
+        if isinstance(s, ast.AugAssign):
+            return self.augassign(s, pad)
+        if isinstance(s, ast.If):
+            return self.if_(s, ind)
+        if isinstance(s, ast.For):
+            return self.for_(s, ind)
+        if isinstance(s, ast.While):
+            if s.orelse:
+                raise TranspileError(f"line {s.lineno}: while/else is not supported")
+            c = self.cond(s.test)
+            self.loop_depth += 1
+            body = self.block(s.body, ind + 1)
+            self.loop_depth -= 1
+            return [f"{pad}while ({c.code}) {{"] + body + [f"{pad}}}"]
+        if isinstance(s, ast.Break):
+            return [f"{pad}break;"]
+        if isinstance(s, ast.Continue):
+            return [f"{pad}continue;"]
+        raise TranspileError(f"line {s.lineno}: unsupported statement {type(s).__name__}")
+
+    def assign(self, s, pad: str) -> List[str]:
+        if isinstance(s, ast.Assign):
+            if len(s.targets) != 1:
+                raise TranspileError(f"line {s.lineno}: chained assignment is not supported")
+            target, value, ann = s.targets[0], s.value, None
+        else:
+            target, value, ann = s.target, s.value, _annotation(s.annotation)
+            if value is None:
+                if not isinstance(target, ast.Name):
+                    raise TranspileError(f"line {s.lineno}: bare annotation on a non-name")
+                self._declare(target.id, ann, s)
+                return []
+        if isinstance(target, ast.Subscript):
+            if isinstance(target.slice, ast.Slice):
+                raise TranspileError(f"line {s.lineno}: slice assignment is not supported")
+            base = target.value
+            if not isinstance(base, ast.Name) or not self.env.get(base.id, Ty.INT).is_list:
+                raise TranspileError(f"line {s.lineno}: item assignment requires a list name")
+            lty = self.env[base.id]
+            idx = self.expr(target.slice)
+            if idx.ty != Ty.INT:
+                raise TranspileError(f"line {s.lineno}: list index must be int")
+            val = self._cast(self.expr(value), lty.elem)
+            # Python evaluates the value before the store target
+            v = self._fresh("v")
+            return [f"{pad}{{ const {lty.elem.value} {v} = {val.code}; "
+                    f"py::at_mut({_ident(base.id)}, {idx.code}) = {v}; }}"]
+        if not isinstance(target, ast.Name):
+            raise TranspileError(f"line {s.lineno}: unsupported assignment target "
+                                 f"({type(target).__name__}); tuple unpacking is not supported")
+        name = target.id
+        if name in self.params and self.env[name].is_list:
+            raise TranspileError(f"line {s.lineno}: rebinding list parameter {name!r}")
+        if isinstance(value, ast.List):
+            want = ann if ann is not None else self.env.get(name)
+            e = self._list_literal(value, want)
+        else:
+            if isinstance(value, ast.Name) and self.env.get(value.id, Ty.INT).is_list:
+                raise TranspileError(f"line {s.lineno}: '{name} = {value.id}' aliases one list "
+                                     f"under two names in Python; C++ would copy it")
+            e = self.expr(value)
+        ty = ann if ann is not None else (self.env.get(name) or e.ty)
+        e = self._cast(e, ty)
+        self._declare(name, ty, s)
+        return [f"{pad}{_ident(name)} = {e.code};"]
+
+    def augassign(self, s: ast.AugAssign, pad: str) -> List[str]:
+        if isinstance(s.target, ast.Name):
+            name = s.target.id
+            if name not in self.env:
+                raise TranspileError(f"line {s.lineno}: {name!r} used before assignment")
+            cur = E(_ident(name), self.env[name])
+            res = self.binop(cur, s.op, self.expr(s.value), s)
+            if res.ty != self.env[name]:
+                raise TranspileError(
+                    f"line {s.lineno}: '{name} {_BINOPS[type(s.op)]}= ...' turns {name!r} from "
+                    f"{self.env[name].name} into {res.ty.name}")
+            return [f"{pad}{_ident(name)} = {res.code};"]
+        if isinstance(s.target, ast.Subscript) and isinstance(s.target.value, ast.Name):
+            base = s.target.value.id
+            lty = self.env.get(base)
+            if lty is None or not lty.is_list:
+                raise TranspileError(f"line {s.lineno}: item augmented assignment needs a list")
+            idx = self.expr(s.target.slice)
+            ref = self._fresh("r")
+            res = self.binop(E(ref, lty.elem), s.op, self.expr(s.value), s)
+            if res.ty != lty.elem:
+                raise TranspileError(f"line {s.lineno}: augmented assignment changes element type")
+            return [f"{pad}{{ {lty.elem.value}& {ref} = py::at_mut({_ident(base)}, {idx.code}); "
+                    f"{ref} = {res.code}; }}"]
+        raise TranspileError(f"line {s.lineno}: unsupported augmented-assignment target")
+
+    def if_(self, s: ast.If, ind: int) -> List[str]:
+        pad = "    " * ind
+        c = self.cond(s.test)
+        out = [f"{pad}if ({c.code}) {{"] + self.block(s.body, ind + 1)
+        orelse = s.orelse
+        while len(orelse) == 1 and isinstance(orelse[0], ast.If):
+            e = orelse[0]
+            c2 = self.cond(e.test)
+            out += [f"{pad}}} else if ({c2.code}) {{"] + self.block(e.body, ind + 1)
+            orelse = e.orelse
+        if orelse:
+            out += [f"{pad}}} else {{"] + self.block(orelse, ind + 1)
+        return out + [f"{pad}}}"]
+
+    def for_(self, s: ast.For, ind: int) -> List[str]:
+        pad = "    " * ind
+        if s.orelse:
+            raise TranspileError(f"line {s.lineno}: for/else is not supported")
+        if not isinstance(s.target, ast.Name):
+            raise TranspileError(f"line {s.lineno}: loop target must be a name")
+        var = s.target.id
+        it = s.iter
+        if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range":
+            args = [self._cast(self.expr(a), Ty.INT) for a in it.args]
+            if not 1 <= len(args) <= 3:
+                raise TranspileError(f"line {s.lineno}: range() takes 1 to 3 arguments")
+            start = args[0].code if len(args) > 1 else "0"
+            stop = args[1].code if len(args) > 1 else args[0].code
+            step_node = it.args[2] if len(args) == 3 else None
+            self._declare(var, Ty.INT, s)
+            k, stp, a0, a1 = (self._fresh(x) for x in ("i", "step", "lo", "hi"))
+            # Python evaluates the range() arguments once, and the loop variable keeps
+            # its LAST assigned value after the loop -- C++'s loop counter would end one
+            # past it -- so iterate a hidden counter and assign the Python name from it.
+            head = [f"{pad}{{", f"{pad}    const int64_t {a0} = {start};",
+                    f"{pad}    const int64_t {a1} = {stop};"]
+            if step_node is None:
+                loop = f"for (int64_t {k} = {a0}; {k} < {a1}; ++{k})"
+            else:
+                head.append(f"{pad}    const int64_t {stp} = {args[2].code};")
+                if isinstance(step_node, ast.Constant) or (
+                        isinstance(step_node, ast.UnaryOp) and isinstance(step_node.operand, ast.Constant)):
+                    sv = self.expr(step_node).code
+                    if sv in ("0", "-0"):
+                        raise TranspileError(f"line {s.lineno}: range() step must not be zero")
+                    cmp = "<" if not sv.startswith("-") else ">"
+                    loop = f"for (int64_t {k} = {a0}; {k} {cmp} {a1}; {k} += {stp})"
+                else:
+                    head.append(f"{pad}    if ({stp} == 0) throw py::ValueError("
+                                f"\"range() arg 3 must not be zero\");")
+                    loop = (f"for (int64_t {k} = {a0}; ({stp} > 0) ? ({k} < {a1}) : ({k} > {a1}); "
+                            f"{k} += {stp})")
+            self.loop_depth += 1
+            body = self.block(s.body, ind + 2)
+            self.loop_depth -= 1
+            return head + [f"{pad}    {loop} {{", f"{pad}        {_ident(var)} = {k};"] + body + \
+                [f"{pad}    }}", f"{pad}}}"]
+        lst = self.expr(it)
+        if not lst.ty.is_list or not isinstance(it, ast.Name):
+            raise TranspileError(f"line {s.lineno}: iterate over range() or a list name")
+        self._declare(var, lst.ty.elem, s)
+        k = self._fresh("k")
+        self.loop_depth += 1
+        body = self.block(s.body, ind + 1)
+        self.loop_depth -= 1
+        # size() re-read each pass: appending while iterating extends the loop, as in Python
+        return [f"{pad}for (std::size_t {k} = 0; {k} < {lst.code}.size(); ++{k}) {{",
+                f"{pad}    {_ident(var)} = {lst.code}[{k}];"] + body + [f"{pad}}}"]
+
+    # -- the whole function ----------------------------------------------------
+    def emit(self) -> str:
+        body = self.block(self.fn.body, 1)
+        decls = []
+        for name, ty in self.decls.items():
+            init = {Ty.INT: " = 0", Ty.FLOAT: " = 0.0", Ty.BOOL: " = false"}.get(ty, "")
+            decls.append(f"    {ty.value} {_ident(name)}{init};")
+        params = ", ".join(self.sig.param_decl(n, t) for n, t in self.sig.params)
+        return "\n".join([f"{self.sig.ret.value} {_ident(self.sig.name)}({params}) {{"] + decls
+                         + body + ["}"])
+
+
+def _int_literal(n: ast.AST) -> Optional[int]:
+    if isinstance(n, ast.Constant) and type(n.value) is int:
+        return n.value
+    if (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub)
+            and isinstance(n.operand, ast.Constant) and type(n.operand.value) is int):
+        return -n.operand.value
+    return None
+
+
+def _chain(fn: str, cs: List[str]) -> str:
+    acc = cs[0]
+    for c in cs[1:]:
+        acc = f"{fn}({acc}, {c})"
+    return acc
+
+
+def _throwing(self: E) -> E:
+    return E(self.code, self.ty, True)
+
+
+E._throwing = _throwing  # type: ignore[attr-defined]
+
+
+class Transpiler:
+    """Parse, type-check and translate a module of typed numeric Python functions."""
+
+    def __init__(self, source: str) -> None:
+        self.source = textwrap.dedent(source)
+        self.tree = ast.parse(self.source)
+        self.fns: List[ast.FunctionDef] = []
+        for node in self.tree.body:
+            if isinstance(node, ast.FunctionDef):
+                self.fns.append(node)
+            elif isinstance(node, ast.Import) and [a.name for a in node.names] == ["math"]:
+                continue
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                continue
+            else:
+                raise TranspileError(f"line {node.lineno}: only functions and 'import math' "
+                                     f"are allowed at module level")
+        self.sigs: Dict[str, Sig] = {f.name: self._signature(f) for f in self.fns}
+
+    def _signature(self, f: ast.FunctionDef) -> Sig:
+        if f.decorator_list:
+            raise TranspileError(f"line {f.lineno}: decorators are not supported")
+        a = f.args
+        if a.vararg or a.kwarg or a.kwonlyargs or a.defaults or a.posonlyargs:
+            raise TranspileError(f"line {f.lineno}: only plain positional parameters are supported")
+        params = []
+        for p in a.args:
+            if p.annotation is None:
+                raise TranspileError(f"line {f.lineno}: parameter {p.arg!r} needs a type annotation")
+            params.append((p.arg, _annotation(p.annotation)))
+        if f.returns is None:
+            raise TranspileError(f"line {f.lineno}: {f.name}() needs a return annotation")
+        mutated = set()
+        for node in ast.walk(f):
+            if isinstance(node, ast.Lambda) or (isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                                                and node is not f):
+                raise TranspileError(f"line {node.lineno}: nested functions, lambdas and classes "
+                                     f"are not supported")
+            if isinstance(node, (ast.Global, ast.Nonlocal, ast.Try, ast.With, ast.Raise,
+                                 ast.ListComp, ast.GeneratorExp, ast.DictComp, ast.SetComp,
+                                 ast.Dict, ast.Set, ast.Tuple, ast.JoinedStr, ast.Yield, ast.Await)):
+                raise TranspileError(f"line {getattr(node, 'lineno', f.lineno)}: "
+                                     f"{type(node).__name__} is not supported")
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) \
+                    and isinstance(node.value, ast.Name):
+                mutated.add(node.value.id)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "append" and isinstance(node.func.value, ast.Name)):
+                mutated.add(node.func.value.id)
+        return Sig(f.name, params, _annotation(f.returns), mutated & {n for n, _ in params})
+
+    def transpile(self) -> str:
+        fwd = [f"{s.ret.value} {_ident(s.name)}("
+               f"{', '.join(s.param_decl(n, t) for n, t in s.params)});" for s in self.sigs.values()]
+        bodies = [_FnEmitter(self.sigs[f.name], self.sigs, f).emit() for f in self.fns]
+        return (PRELUDE + "\nnamespace alpha {\n\n" + "\n".join(fwd) + "\n\n"
+                + "\n\n".join(bodies) + "\n\n}  // namespace alpha\n")
+
+
+def transpile(source: str) -> str:
+    return Transpiler(source).transpile()
+
+
+# ===========================================================================
+# 4. COMPILATION, DIFFERENTIAL TESTING, BENCHMARKING
+# ===========================================================================
+
+def _harness(sigs: Dict[str, Sig]) -> str:
+    """A driver: `./bin <fn> test` reads cases from stdin and prints results
+    (floats in exact %a hex); `./bin <fn> bench <reps>` times the hot loop."""
+    L = [r'''
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <chrono>
+[[maybe_unused]] static double rd_f() { char b[128]; if (std::scanf("%127s", b) != 1) std::exit(3); return std::strtod(b, nullptr); }
+[[maybe_unused]] static int64_t rd_i() { long long v; if (std::scanf("%lld", &v) != 1) std::exit(3); return v; }
+[[maybe_unused]] static bool rd_b() { return rd_i() != 0; }
+[[maybe_unused]] static std::vector<double> rd_lf() { int64_t n = rd_i(); std::vector<double> v(n); for (auto& x : v) x = rd_f(); return v; }
+[[maybe_unused]] static std::vector<int64_t> rd_li() { int64_t n = rd_i(); std::vector<int64_t> v(n); for (auto& x : v) x = rd_i(); return v; }
+[[maybe_unused]] static void wr(double x) { std::printf("%a", x); }
+[[maybe_unused]] static void wr(int64_t x) { std::printf("%lld", (long long)x); }
+[[maybe_unused]] static void wr(bool x) { std::printf("%d", (int)x); }
+[[maybe_unused]] static void wr(const std::vector<double>& v) { std::printf("%zu", v.size()); for (double x : v) std::printf(" %a", x); }
+[[maybe_unused]] static void wr(const std::vector<int64_t>& v) { std::printf("%zu", v.size()); for (auto x : v) std::printf(" %lld", (long long)x); }
+[[maybe_unused]] static double dg(double x) { return x; }
+[[maybe_unused]] static double dg(int64_t x) { return (double)x; }
+[[maybe_unused]] static double dg(bool x) { return x; }
+template <class T> [[maybe_unused]] static double dg(const std::vector<T>& v) { return v.empty() ? 0.0 : (double)v[v.size() / 2] + (double)v.back(); }
+''']
+    rd = {Ty.FLOAT: "rd_f()", Ty.INT: "rd_i()", Ty.BOOL: "rd_b()", Ty.LFLOAT: "rd_lf()", Ty.LINT: "rd_li()"}
+    for s in sigs.values():
+        args = ", ".join(f"a{i}" for i in range(len(s.params)))
+        reads = "".join(f"        auto a{i} = {rd[t]};\n" for i, (_, t) in enumerate(s.params))
+        L.append(f'''static int run_{s.name}(const char* mode, long reps) {{
+    if (std::strcmp(mode, "test") == 0) {{
+        long nc = (long)rd_i();
+        for (long c = 0; c < nc; ++c) {{
+{reads}            try {{ auto r = alpha::{_ident(s.name)}({args}); std::printf("OK "); wr(r); std::printf("\\n"); }}
+            catch (const py::Error& e) {{ std::printf("EXC %s\\n", e.kind()); }}
+        }}
+        return 0;
+    }}
+{reads}    double sink = 0.0;
+    auto t0 = std::chrono::steady_clock::now();
+    for (long r = 0; r < reps; ++r) {{
+        __asm__ __volatile__("" ::: "memory");
+        sink += dg(alpha::{_ident(s.name)}({args}));
+    }}
+    auto t1 = std::chrono::steady_clock::now();
+    double ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / reps;
+    std::printf("%.4f %a\\n", ns, sink);
+    return 0;
+}}''')
+    L.append("int main(int argc, char** argv) {\n    if (argc < 3) return 2;\n"
+             "    long reps = argc > 3 ? std::atol(argv[3]) : 1;")
+    for s in sigs.values():
+        L.append(f'    if (std::strcmp(argv[1], "{s.name}") == 0) return run_{s.name}(argv[2], reps);')
+    L.append("    return 4;\n}\n")
+    return "\n".join(L)
+
+
+_BUILD_DIR = tempfile.mkdtemp(prefix="alpha_cpp_")
+
+
+def compile_cpp(source: str, flags: Sequence[str] = ("-O3",), tag: str = "b") -> str:
+    """Transpile, append the harness, compile with g++. Returns the binary path."""
+    t = Transpiler(source)
+    cpp = t.transpile() + "\n" + _harness(t.sigs)
+    src = os.path.join(_BUILD_DIR, f"{tag}.cpp")
+    exe = os.path.join(_BUILD_DIR, tag + ".exe")
+    with open(src, "w") as fh:
+        fh.write(cpp)
+    cmd = ["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", *flags, src, "-o", exe]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("g++ failed:\n" + r.stderr[-4000:])
+    return exe
+
+
+def _enc(v, ty: Ty) -> List[str]:
+    if ty == Ty.FLOAT:
+        return [float(v).hex()]
+    if ty in (Ty.INT, Ty.BOOL):
+        return [str(int(v))]
+    if ty == Ty.LFLOAT:
+        return [str(len(v))] + [float(x).hex() for x in v]
+    return [str(len(v))] + [str(int(x)) for x in v]
+
+
+def _same(a: float, b: float) -> bool:
+    if math.isnan(a) and math.isnan(b):
+        return True
+    return struct.pack("<d", a) == struct.pack("<d", b)
+
+
+_PY_EXC = (ZeroDivisionError, IndexError, ValueError, OverflowError)
+
+
+@dataclass
+class DiffReport:
+    n: int
+    exact: int
+    loud: int              # C++ raised OverflowError where Python computed a big int
+    silent: List[str]      # anything else: a genuine divergence
+
+    @property
+    def ok(self) -> bool:
+        return not self.silent
+
+
+def differential_test(source: str, fn: str, cases: List[tuple], exe: str) -> DiffReport:
+    """
+    Run the compiled function and the Python original on the same inputs and
+    compare bit for bit -- float bit patterns (NaNs equal to each other), the
+    sign of zero, and the type of any exception raised.
+    """
+    t = Transpiler(source)
+    sig = t.sigs[fn]
+    ns: Dict = {"math": math}
+    exec(compile(t.source, "<strategy>", "exec"), ns)
+    pyf = ns[fn]
+    toks = [str(len(cases))]
+    for c in cases:
+        for v, (_, ty) in zip(c, sig.params):
+            toks += _enc(v, ty)
+    out = subprocess.run([exe, fn, "test"], input=" ".join(toks), capture_output=True,
+                         text=True).stdout.strip().split("\n")
+    exact, loud, silent = 0, 0, []
+    for c, line in zip(cases, out):
+        try:
+            ref = pyf(*[list(v) if isinstance(v, list) else v for v in c])
+            ref_exc = None
+        except _PY_EXC as e:
+            ref, ref_exc = None, type(e).__name__
+        parts = line.split()
+        if parts[0] == "EXC":
+            if ref_exc == parts[1]:
+                exact += 1
+            elif ref_exc is None and (parts[1] == "OverflowError" or isinstance(ref, complex)):
+                # By construction of the prelude, C++ raises OverflowError while Python
+                # returns normally ONLY at an int64 limit -- float overflow raises in both --
+                # and ValueError for a result Python would make complex. Loud, by design.
+                loud += 1
+            else:
+                silent.append(f"{fn}{c!r}: python {ref_exc or ref!r}, c++ {parts[1]}")
+            continue
+        if ref_exc is not None:
+            silent.append(f"{fn}{c!r}: python raised {ref_exc}, c++ returned {parts[1:]}")
+            continue
+        if sig.ret in (Ty.LFLOAT, Ty.LINT):
+            got = [float.fromhex(x) if sig.ret == Ty.LFLOAT else int(x) for x in parts[2:]]
+            good = len(got) == len(ref) and all(
+                _same(float(a), float(b)) if sig.ret == Ty.LFLOAT else a == b for a, b in zip(got, ref))
+        elif sig.ret == Ty.FLOAT:
+            good = _same(float.fromhex(parts[1]), float(ref))
+        else:
+            good = int(parts[1]) == int(ref)
+        if good:
+            exact += 1
+        else:
+            silent.append(f"{fn}{c!r}: python {ref!r}, c++ {parts[1:4]}")
+    return DiffReport(len(cases), exact, loud, silent)
+
+
+def bench_cpp(exe: str, fn: str, args: tuple, sig: Sig, reps: int) -> float:
+    toks = []
+    for v, (_, ty) in zip(args, sig.params):
+        toks += _enc(v, ty)
+    out = subprocess.run([exe, fn, "bench", str(reps)], input=" ".join(toks),
+                         capture_output=True, text=True).stdout.split()
+    return float(out[0])
+
+
+def bench_py(pyf: Callable, args: tuple, min_time: float = 0.3) -> float:
+    n = 1
+    while True:
+        t = timeit.timeit(lambda: pyf(*args), number=n)
+        if t >= min_time:
+            return 1e9 * t / n
+        n *= 4
+
+
+# ===========================================================================
+# 5. STRATEGIES AND PROBES
+# ===========================================================================
+
+STRATEGIES = '''
+import math
+
+
+def ma_crossover(prices: list[float], fast: int, slow: int, band: float) -> float:
+    """Moving-average crossover on the latest window: +1 long, -1 short, 0 flat."""
+    n: int = len(prices)
+    if n < slow or fast <= 0 or fast >= slow:
+        return 0.0
+    fast_ma: float = sum(prices[n - fast:]) / fast
+    slow_ma: float = sum(prices[n - slow:]) / slow
+    spread: float = (fast_ma - slow_ma) / slow_ma
+    if spread > band:
+        return 1.0
+    elif spread < -band:
+        return -1.0
+    return 0.0
+
+
+def crossover_series(prices: list[float], fast: int, slow: int, band: float) -> list[float]:
+    """The crossover signal at every tick, recomputing each window: O(n (fast + slow))."""
+    n: int = len(prices)
+    signals: list[float] = [0.0] * n
+    for i in range(slow, n + 1):
+        fast_ma: float = sum(prices[i - fast:i]) / fast
+        slow_ma: float = sum(prices[i - slow:i]) / slow
+        spread: float = (fast_ma - slow_ma) / slow_ma
+        s: float = 0.0
+        if spread > band:
+            s = 1.0
+        elif spread < -band:
+            s = -1.0
+        signals[i - 1] = s
+    return signals
+
+
+def crossover_series_incremental(prices: list[float], fast: int, slow: int,
+                                 band: float) -> list[float]:
+    """The same signal with running window sums: O(n)."""
+    n: int = len(prices)
+    signals: list[float] = [0.0] * n
+    fsum: float = 0.0
+    ssum: float = 0.0
+    for i in range(n):
+        fsum += prices[i]
+        ssum += prices[i]
+        if i >= fast:
+            fsum -= prices[i - fast]
+        if i >= slow:
+            ssum -= prices[i - slow]
+        if i >= slow - 1:
+            spread: float = (fsum / fast - ssum / slow) / (ssum / slow)
+            if spread > band:
+                signals[i] = 1.0
+            elif spread < -band:
+                signals[i] = -1.0
+    return signals
+
+
+def ewma_zscore(prices: list[float], halflife: float) -> float:
+    """Z-score of the last price against an exponentially weighted mean and variance."""
+    alpha: float = 1.0 - math.exp(-math.log(2.0) / halflife)
+    mean: float = prices[0]
+    var: float = 0.0
+    for i in range(1, len(prices)):
+        d: float = prices[i] - mean
+        mean = mean + alpha * d
+        var = (1.0 - alpha) * (var + alpha * d * d)
+    if var <= 0.0:
+        return 0.0
+    return (prices[-1] - mean) / math.sqrt(var)
+'''
+
+PROBES = '''
+import math
+
+
+def p_intdiv(a: int, b: int) -> int:
+    return a // b * 1000 + a % b
+
+
+def p_floatdiv(x: float, y: float) -> float:
+    return (x // y) * 1000.0 + (x % y) + x / y
+
+
+def p_round(x: float) -> int:
+    return round(x) + int(x) * 1000
+
+
+def p_pow(x: float, y: float, a: int) -> float:
+    return abs(x) ** y + a ** 3 + x ** 2 + a ** -2
+
+
+def p_index(xs: list[float], i: int) -> float:
+    return xs[i] + xs[-1]
+
+
+def p_slices(xs: list[float], lo: int, hi: int) -> float:
+    return sum(xs[lo:hi]) * 1000.0 + len(xs[lo:hi]) + sum(xs[lo:]) + sum(xs[:hi])
+
+
+def p_sum(xs: list[float]) -> float:
+    return sum(xs)
+
+
+def p_minmax(xs: list[float], x: float, y: float) -> float:
+    return min(xs) + max(xs) * 2.0 + min(x, y) * 3.0 + max(x, y, 0.5) * 4.0
+
+
+def p_math(x: float) -> float:
+    return math.sqrt(x) + math.log(x) + math.exp(x / 100.0) + math.floor(x) + math.ceil(x)
+
+
+def p_control(n: int, x: float) -> float:
+    acc: float = 0.0
+    j: int = -1
+    for i in range(n):
+        if i % 3 == 0:
+            continue
+        acc += x * i
+        j = i
+        if acc > 1e6:
+            break
+    k: int = n
+    while k > 0 and acc < 1e5:
+        k -= 2
+        acc = acc * 1.5 + 1.0
+    return acc + j * 1e-3 + (1.0 if 0 < j < 5 < n else -1.0)
+
+
+def p_loopvar(n: int, step: int) -> int:
+    i: int = 99
+    for i in range(n, -n, step):
+        pass
+    return i
+
+
+def p_build(n: int, x: float) -> list[float]:
+    out: list[float] = []
+    for i in range(n):
+        out.append(x * i)
+    tail: list[float] = out[-3:]
+    if tail:
+        out[0] = tail[0] + 1.0
+        out[-1] += 2.0
+    return out
+'''
+
+
+def _rand_float(r: random.Random) -> float:
+    u = r.random()
+    if u < 0.15:
+        return r.choice([0.0, -0.0, 1.0, -1.0, 0.1, 2.5, -2.5, 0.5, -0.5, 3.0, 1e-300,
+                         1e300, -1e300, math.inf, -math.inf, math.nan])
+    if u < 0.6:
+        return r.uniform(-50, 50)
+    return r.uniform(-1e6, 1e6) * (10.0 ** r.randint(-6, 3))
+
+
+def _rand_int(r: random.Random) -> int:
+    u = r.random()
+    if u < 0.1:
+        return r.choice([0, -1, 1, 2**40, -(2**40), 7, -7, 3, -3])
+    return r.randint(-25, 25)
+
+
+_LOOPING = {"p_control", "p_loopvar", "p_build"}
+
+
+def _probe_cases(sig: Sig, n: int, seed: int) -> List[tuple]:
+    r = random.Random(seed)
+    cases = []
+    for _ in range(n):
+        c = []
+        for _, ty in sig.params:
+            if ty == Ty.FLOAT:
+                c.append(_rand_float(r))
+            elif ty == Ty.INT:
+                c.append(r.randint(-25, 25) if sig.name in _LOOPING else _rand_int(r))
+            elif ty == Ty.LFLOAT:
+                c.append([_rand_float(r) for _ in range(r.randint(0, 7))])
+            else:
+                c.append([_rand_int(r) for _ in range(r.randint(0, 7))])
+        cases.append(tuple(c))
+    return cases
+
+
+def _random_walk(n: int, seed: int) -> List[float]:
+    r = random.Random(seed)
+    p, out = 100.0, []
+    for _ in range(n):
+        p *= math.exp(r.gauss(0.0, 0.002))
+        out.append(p)
+    return out
+
+
+# ===========================================================================
+# SELF-TESTS
+# ===========================================================================
+
+def _test_naive_translations_are_wrong() -> None:
+    """The traps, measured in Python itself."""
+    r = random.Random(0)
+    diff = 0
+    for _ in range(2000):
+        a = [r.uniform(-1e6, 1e6) for _ in range(50)]
+        s = 0.0
+        for v in a:
+            s += v
+        diff += s != sum(a)
+    assert diff > 1000 and 1 // 0.1 == 9.0 and -7 // 2 == -4 and -7 % 3 == 2 and round(2.5) == 2
+    print(f"[ok] naive C++ spellings of Python are wrong: sum() differs from a left-to-right loop "
+          f"on {diff}/2000 lists (Neumaier, Python {sys.version_info.major}.{sys.version_info.minor}); "
+          f"1 // 0.1 = {1 // 0.1}, not floor(1/0.1) = 10; -7 // 2 = -4; -7 % 3 = 2; round(2.5) = 2")
+
+
+def _test_probes_bit_exact() -> None:
+    """
+    Every semantic trap, compiled at -O3 and run against Python on random and
+    adversarial inputs -- zeros of both signs, infinities, NaN, huge and tiny
+    values, negative indices, empty lists. Silent divergences must be zero.
+    """
+    exe = compile_cpp(PROBES, ("-O3",), "probes")
+    t = Transpiler(PROBES)
+    tot = exact = loud = 0
+    rows = []
+    for name, sig in t.sigs.items():
+        seed = sum(map(ord, name))
+        rep = differential_test(PROBES, name, _probe_cases(sig, 1500, seed), exe)
+        assert rep.ok, "\n".join(rep.silent[:5])
+        tot, exact, loud = tot + rep.n, exact + rep.loud, loud + rep.loud
+        rows.append((name, rep.exact, rep.loud, rep.n))
+    print(f"[ok] {len(rows)} semantic probes x 1,500 adversarial inputs at -O3: {exact:,} bit-exact "
+          f"(values, signed zeros, exception types), {loud} loud int64 overflows, "
+          f"0 silent divergences")
+    print("       " + ", ".join(f"{n}:{e}" + (f"+{l}loud" if l else "") for n, e, l, _ in rows))
+
+
+def _test_fails_closed() -> None:
+    """Anything outside the subset is rejected, never guessed at."""
+    bad = {
+        "type change int->float": "def f(x: float) -> float:\n    t = 0\n    t += x\n    return t",
+        "int /=": "def f(a: int) -> int:\n    a /= 2\n    return a",
+        "list aliasing": "def f(xs: list[float]) -> float:\n    ys = xs\n    return ys[0]",
+        "dict": "def f(x: float) -> float:\n    d = {1: x}\n    return x",
+        "list comprehension": "def f(xs: list[float]) -> float:\n    return sum([x for x in xs])",
+        "tuple unpacking": "def f(a: int, b: int) -> int:\n    a, b = b, a\n    return a",
+        "variable int exponent": "def f(a: int, b: int) -> int:\n    return a ** b",
+        "mixed min": "def f(a: int, x: float) -> float:\n    return min(a, x)",
+        "and on floats": "def f(x: float, y: float) -> float:\n    return x and y",
+        "lambda": "def f(x: float) -> float:\n    g = lambda z: z\n    return x",
+        "string": "def f(x: float) -> float:\n    s = 'a'\n    return x",
+        "missing annotation": "def f(x) -> float:\n    return x",
+        "while-else": "def f(n: int) -> int:\n    while n > 0:\n        n -= 1\n    else:\n        n = 5\n    return n",
+        "unknown call": "def f(x: float) -> float:\n    return print(x)",
+        "returning a list param": "def f(xs: list[float]) -> list[float]:\n    return xs",
+    }
+    rejected = []
+    for label, src in bad.items():
+        try:
+            transpile(src)
+        except TranspileError as e:
+            rejected.append((label, str(e)))
+            continue
+        raise AssertionError(f"accepted unsupported construct: {label}")
+    print(f"[ok] {len(rejected)} unsupported constructs rejected with a reason, none guessed at; e.g.")
+    for label, msg in rejected[:3]:
+        print(f"       {label}: {msg}")
+
+
+def _test_strategies_bit_exact() -> None:
+    exe = compile_cpp(STRATEGIES, ("-O3",), "strat")
+    t = Transpiler(STRATEGIES)
+    r = random.Random(5)
+    total = 0
+    for name in t.sigs:
+        cases = []
+        for k in range(60 if "series" in name else 400):
+            px = _random_walk(r.randint(0, 400 if "series" in name else 300), r.randint(0, 10**6))
+            if name == "ewma_zscore":
+                if not px:
+                    px = [100.0]
+                cases.append((px, r.choice([0.5, 5.0, 20.0, 60.0, r.uniform(0.1, 100)])))
+            else:
+                fast, slow = r.randint(-2, 40), r.randint(1, 120)
+                cases.append((px, fast, slow, r.choice([0.0, 1e-4, 1e-3, r.uniform(0, 0.01)])))
+        rep = differential_test(STRATEGIES, name, cases, exe)
+        assert rep.ok, "\n".join(rep.silent[:5])
+        total += rep.exact
+    print(f"[ok] all 4 strategies transpiled, compiled at -O3 and bit-exact against Python "
+          f"on {total:,} inputs")
+
+
+def _flag_source() -> str:
+    tree = ast.parse(STRATEGIES)
+    ewma = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "ewma_zscore")
+    return ("import math\n\n" + ast.get_source_segment(STRATEGIES, ewma) + "\n\n\n"
+            "def window_sum(xs: list[float]) -> float:\n    return sum(xs)\n")
+
+
+def _test_compiler_flags_decide_faithfulness() -> None:
+    """
+    The transpiler emits faithful C++; the compiler can still break it. -O3 alone
+    preserves IEEE semantics. -march=native enables FMA, and GCC 13 then
+    CONTRACTS a*b + c into one fused multiply-add with a single rounding -- in
+    every C++ mode, GNU or strict ISO alike; only -ffp-contract=off stops it.
+    -ffast-math reassociates freely and deletes Neumaier compensation outright,
+    since (f - t) + x is algebraically zero.
+
+    window_sum returns the raw sum, because a thresholded signal would hide a
+    last-bit difference unless it happened to land on a near-tie.
+    """
+    src = _flag_source()
+    r = random.Random(9)
+    cases = {
+        "ewma_zscore": [(_random_walk(r.randint(2, 300), r.randint(0, 10**6)), r.uniform(1, 80))
+                        for _ in range(400)],
+        "window_sum": [([r.uniform(-1e6, 1e6) for _ in range(50)],) for _ in range(400)],
+    }
+    configs = [("-O3", ("-O3",)),
+               ("-O3 -march=native  (default gnu++17)", ("-O3", "-march=native", "-std=gnu++17")),
+               ("-O3 -march=native  -std=c++17", ("-O3", "-march=native", "-std=c++17")),
+               ("-O3 -march=native -ffp-contract=off",
+                ("-O3", "-march=native", "-std=gnu++17", "-ffp-contract=off")),
+               ("-O3 -ffast-math", ("-O3", "-ffast-math"))]
+    rows = []
+    for i, (label, flags) in enumerate(configs):
+        exe = compile_cpp(src, flags, f"flags{i}")
+        rows.append((label, {fn: len(differential_test(src, fn, cs, exe).silent)
+                             for fn, cs in cases.items()}))
+    by = dict(rows)
+    assert by["-O3"] == {"ewma_zscore": 0, "window_sum": 0}, by["-O3"]
+    assert by["-O3 -march=native  (default gnu++17)"]["ewma_zscore"] > 0, "expected FMA contraction"
+    assert by["-O3 -march=native -ffp-contract=off"] == {"ewma_zscore": 0, "window_sum": 0}
+    assert by["-O3 -ffast-math"]["window_sum"] > 0, "expected -ffast-math to break sum()"
+    print("[ok] results that differ from Python, by compiler flags (400 inputs each):")
+    print(f"       {'flags':<40}{'ewma_zscore':>12}{'window_sum':>12}")
+    for label, mm in rows:
+        print(f"       {label:<40}{mm['ewma_zscore']:>12}{mm['window_sum']:>12}")
+    print("     -march=native fuses multiply-adds in strict -std=c++17 as well as the GNU dialect:")
+    print("     only -ffp-contract=off restores exactness. -ffast-math breaks sum() by optimising")
+    print("     the compensation away")
+    assert by["-O3 -march=native  -std=c++17"]["ewma_zscore"] > 0
+
+
+def _test_complex_results_fail_loud() -> None:
+    """Python turns a negative base to a fractional power into a complex number.
+    C++ has no such value here, so the generated code raises instead of
+    returning a NaN that would flow silently into a signal."""
+    src = "def f(x: float, y: float) -> float:\n    return x ** y\n"
+    exe = compile_cpp(src, ("-O3",), "cplx")
+    rep = differential_test(src, "f", [(-8.0, 0.5), (-8.0, 1.0 / 3.0), (-2.0, 3.0), (4.0, 0.5)], exe)
+    assert rep.ok and rep.loud == 2 and rep.exact == 2, rep
+    print(f"[ok] (-8.0) ** 0.5 is complex in Python: the C++ raises ValueError rather than return "
+          f"NaN ({rep.loud} loud, {rep.exact} exact, 0 silent)")
+
+
+def _speed_rows() -> List[Tuple[str, float, float]]:
+    t = Transpiler(STRATEGIES)
+    exe = compile_cpp(STRATEGIES, ("-O3",), "speed")
+    ns: Dict = {"math": math}
+    exec(compile(t.source, "<s>", "exec"), ns)
+    px = _random_walk(200, 1)
+    series = _random_walk(20_000, 2)
+    jobs = [
+        ("ma_crossover, 200-tick window", "ma_crossover", (px, 20, 100, 1e-3), 200_000),
+        ("ewma_zscore, 200 ticks", "ewma_zscore", (px, 30.0), 200_000),
+        ("crossover_series, 20k ticks, naive", "crossover_series", (series, 20, 100, 1e-3), 40),
+        ("crossover_series, 20k ticks, incremental", "crossover_series_incremental",
+         (series, 20, 100, 1e-3), 400),
+    ]
+    out = []
+    for label, fn, args, reps in jobs:
+        c = bench_cpp(exe, fn, args, t.sigs[fn], reps)
+        p = bench_py(ns[fn], args)
+        out.append((label, p, c))
+    fast = compile_cpp(STRATEGIES, ("-O3", "-ffast-math"), "speed_fastmath")
+    c_ff = bench_cpp(fast, "ma_crossover", (px, 20, 100, 1e-3), t.sigs["ma_crossover"], 400_000)
+    out.append(("ma_crossover, -ffast-math (NOT faithful)", out[0][1], c_ff))
+    return out
+
+
+def _test_speed(rows: List[Tuple[str, float, float]]) -> None:
+    print("[ok] single-threaded latency, same inputs, bit-identical outputs:")
+    print(f"       {'function':<44}{'Python':>12}{'C++ -O3':>12}{'speedup':>9}")
+    for label, p, c in rows:
+        print(f"       {label:<44}{_fmt_ns(p):>12}{_fmt_ns(c):>12}{p / c:>8.0f}x")
+    naive = next(r for r in rows if "naive" in r[0])
+    inc = next(r for r in rows if "incremental" in r[0])
+    ff = next(r for r in rows if "fast-math" in r[0])
+    print(f"     faithfulness has a price: Python's compensated sum() cannot be vectorised, and the")
+    print(f"     -ffast-math build that drops it runs {rows[0][2] / ff[2]:.1f}x faster -- with sums that "
+          f"no longer match Python's")
+    print(f"     the algorithm matters as much as the language: incremental over naive is "
+          f"{naive[2] / inc[2]:.0f}x in C++,")
+    print(f"     and the naive Python loop gains only {naive[1] / naive[2]:.0f}x from compilation because "
+          f"its sum() over slices was already running in C")
+    assert all(p > c for _, p, c in rows)
+
+
+def _fmt_ns(x: float) -> str:
+    return f"{x:,.0f} ns" if x < 1e5 else f"{x / 1e6:,.2f} ms"
+
+
+def _spreads(px: List[float], fast: int, slow: int) -> Tuple[List[float], List[float]]:
+    """The raw crossover spread both ways: fresh compensated window sums (as
+    sum() computes them) and running add-then-subtract sums."""
+    n = len(px)
+    fresh, run = [], []
+    fs = ss = 0.0
+    for i in range(n):
+        fs += px[i]
+        ss += px[i]
+        if i >= fast:
+            fs -= px[i - fast]
+        if i >= slow:
+            ss -= px[i - slow]
+        if i >= slow - 1:
+            f1 = sum(px[i + 1 - fast:i + 1]) / fast
+            s1 = sum(px[i + 1 - slow:i + 1]) / slow
+            fresh.append((f1 - s1) / s1)
+            run.append((fs / fast - ss / slow) / (ss / slow))
+    return fresh, run
+
+
+def _test_algorithm_change_is_not_free() -> None:
+    """
+    Running sums are a different computation, not a faster spelling of the same
+    one: add-then-subtract accumulates rounding that a fresh compensated sum does
+    not. Both versions transpile bit-exactly from their Python sources -- any
+    difference lives in the algorithm, not the compiler.
+
+    Measured, the drift is real and small: the spreads are not bit-identical,
+    but at ~1e-14 against a typical spread of ~1e-3 a signal would only flip on a
+    tie to eleven digits. Over these series none does. The drift grows with the
+    length of the run, which is why production code re-anchors running sums.
+    """
+    t = Transpiler(STRATEGIES)
+    ns: Dict = {"math": math}
+    exec(compile(t.source, "<s>", "exec"), ns)
+    flips, n_total = 0, 0
+    for s in range(6):
+        px = _random_walk(20_000, 100 + s)
+        a = ns["crossover_series"](px, 20, 100, 0.0)
+        b = ns["crossover_series_incremental"](px, 20, 100, 0.0)
+        flips += sum(1 for x, y in zip(a, b) if x != y)
+        n_total += len(a)
+    rows = []
+    for n in (2_000, 20_000, 200_000):
+        fresh, run = _spreads(_random_walk(n, 7), 20, 100)
+        err = [abs(x - y) for x, y in zip(fresh, run)]
+        differ = sum(1 for e in err if e > 0)
+        rows.append((n, differ / len(err), max(err), sorted(abs(x) for x in fresh)[len(fresh) // 2]))
+    assert rows[-1][1] > 0.5, "expected running sums to differ from fresh ones"
+    assert rows[-1][2] > rows[0][2], "expected drift to grow with run length"
+    print(f"[ok] naive vs incremental crossover, {n_total:,} ticks, zero band: {flips} signals differ")
+    print(f"       {'run length':>11} {'spreads not bit-equal':>22} {'max |drift|':>12} "
+          f"{'median |spread|':>16}")
+    for n, frac, mx, med in rows:
+        print(f"       {n:>11,} {100 * frac:>21.1f}% {mx:>12.1e} {med:>16.1e}")
+    print("     the running sum is a different computation that happens to agree on every signal;")
+    print("     its drift grows with run length. Choosing it is a research decision, not the compiler's")
+
+
+def _run(title: str, tests) -> None:
+    print("=" * 78)
+    print(title)
+    print("=" * 78)
+    for f in tests:
+        f()
+    print()
+
+
+# ===========================================================================
+# MAIN
+# ===========================================================================
+
+def _main() -> None:
+    print("=" * 78)
+    print("MAIN: TRANSPILING A MOVING-AVERAGE CROSSOVER")
+    print("=" * 78)
+    src = STRATEGIES[: STRATEGIES.index("def crossover_series(")]
+    print("  Python source:")
+    for line in src.strip().splitlines():
+        print("    " + line)
+    cpp = transpile(src)
+    print("\n  generated C++ (runtime prelude, then the function):\n")
+    print(cpp)
+    exe = compile_cpp(src, ("-O3",), "main")
+    t = Transpiler(src)
+    r = random.Random(7)
+    cases = [(_random_walk(r.randint(0, 300), r.randint(0, 10**6)), r.randint(-2, 40),
+              r.randint(1, 120), r.uniform(0, 0.005)) for _ in range(2000)]
+    rep = differential_test(src, "ma_crossover", cases, exe)
+    ns: Dict = {"math": math}
+    exec(compile(t.source, "<s>", "exec"), ns)
+    px = _random_walk(200, 1)
+    c = bench_cpp(exe, "ma_crossover", (px, 20, 100, 1e-3), t.sigs["ma_crossover"], 500_000)
+    p = bench_py(ns["ma_crossover"], (px, 20, 100, 1e-3))
+    print(f"  compiled: g++ -std=c++17 -O3 -Wall -Wextra -Werror, no warnings")
+    print(f"  differential test: {rep.exact:,}/{rep.n:,} inputs bit-exact against Python")
+    print(f"  latency on a 200-tick window: Python {p:,.0f} ns, C++ {c:,.1f} ns ({p / c:.0f}x)")
+    assert rep.ok and rep.exact == rep.n
+
+
+if __name__ == "__main__":
+    t0 = time.time()
+    _run("FAITHFULNESS", [
+        _test_naive_translations_are_wrong,
+        _test_probes_bit_exact,
+        _test_fails_closed,
+        _test_strategies_bit_exact,
+        _test_complex_results_fail_loud,
+        _test_compiler_flags_decide_faithfulness,
+    ])
+    _run("SPEED", [
+        lambda: _test_speed(_speed_rows()),
+        _test_algorithm_change_is_not_free,
+    ])
+    _main()
+    print(f"\ncompleted in {time.time() - t0:.0f}s")

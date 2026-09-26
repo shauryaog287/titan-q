@@ -1,0 +1,14 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Runtime state rewritten every few seconds by the live system
+dashboard_state.json
+live_state.json
+
+# Generated outputs (reproducible by re-running the scripts)
+*.png
+equity_curve_results.csv
+
+# Local tool config (personal settings, not project code)
+.claude.json
