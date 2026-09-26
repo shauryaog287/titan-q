@@ -15,3 +15,6 @@ equity_curve_results.csv
 
 # Run logs
 logs/
+
+# Market data cache (re-downloadable; intraday archive grows daily)
+data/
