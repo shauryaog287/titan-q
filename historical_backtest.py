@@ -1,12 +1,17 @@
 """
 historical_backtest.py
 ======================
-The Offline Backtesting Harness for the Titan-Q AI Trading Engine.
+PIPELINE SMOKE TEST -- NOT A PERFORMANCE ESTIMATE.
 
-This script operates completely offline, designed to iterate over historical
-NIFTY 500 data stored in the Google Drive Data Lake. It replays historical
-ticks through all 25 Phases of the architecture to compute an exact equity curve
-and Sharpe ratio.
+This script checks that the modules import and run together end to end. It
+reads no historical data (every input is random), the models are untrained,
+and each trade's PnL is a random draw with a hard-coded positive mean (see the
+pnl_pct lines below). Its win rate and Sharpe ratio are therefore set by those
+constants, not by any model: win rate ~= Phi(mean/sd), Sharpe ~= mean/sd times
+an annualisation factor. See Titan-Q_Whitepaper.md, Section 6.
+
+Do not quote its numbers as results. The real, walk-forward backtest is
+backtest_daily.py.
 """
 
 import os
@@ -66,11 +71,11 @@ def run_historical_backtest(start_date: str, end_date: str, initial_capital: flo
     
     for tick in range(1, n_ticks + 1):
         if tick % 1000 == 0:
-            logging.info(f"Processed {tick}/{n_ticks} ticks. Current Equity: ₹{capital:,.2f}")
+            logging.info(f"Processed {tick}/{n_ticks} ticks. Current Equity: Rs. {capital:,.2f}")
             
         # --- Simulate reading a row from the historical DataFrame ---
         # Feature: LOB window (Phase 18)
-        lob_window = torch.randn(1, 50, 4, 10, dtype=torch.float64)
+        lob_window = torch.randn(1, 50, 4, 10, dtype=torch.float32)
         
         # Feature: Transfer Entropy Causality (Phase 24)
         options_vol = np.random.randn(50)
@@ -140,12 +145,12 @@ def run_historical_backtest(start_date: str, end_date: str, initial_capital: flo
     win_rate = (active_trades > 0).mean() if len(active_trades) > 0 else 0.0
     
     logging.info("==================================================")
-    logging.info("BACKTEST COMPLETE")
+    logging.info("SMOKE TEST COMPLETE (random PnL -- NOT a performance result)")
     logging.info("==================================================")
     logging.info(f"Time Elapsed:   {end_time - start_time:.2f} seconds")
     logging.info(f"Ticks Replayed: {n_ticks:,}")
-    logging.info(f"Starting Eq:    ₹{initial_capital:,.2f}")
-    logging.info(f"Ending Eq:      ₹{capital:,.2f}")
+    logging.info(f"Starting Eq:    Rs. {initial_capital:,.2f}")
+    logging.info(f"Ending Eq:      Rs. {capital:,.2f}")
     logging.info(f"Total Return:   {total_return:.2%}")
     logging.info(f"Est. Sharpe:    {sharpe:.2f}")
     logging.info(f"Trade Accuracy: {win_rate:.2%} (Win Rate)")

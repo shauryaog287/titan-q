@@ -1,6 +1,7 @@
 @echo off
 color 0A
 title Titan-Q AI Master Control
+cd /d D:\Quant_Project
 echo =======================================================
 echo          TITAN-Q LIVE MARKET DEPLOYMENT (NSE)
 echo =======================================================
@@ -8,24 +9,22 @@ echo.
 echo Checking data feed and AI sub-systems...
 echo.
 
-:: Launch the Whole Market Feed in the background
-start "NSE Whole Market Feed" cmd /c "D:\trader_env\Scripts\python.exe D:\Quant_Project\nse_whole_market_feed.py"
-echo [OK] Market Data Websocket Launched.
+:: The synthetic GBM feed (nse_whole_market_feed.py) is no longer launched here:
+:: the trading loop never read its output. Market data now comes from
+:: market_data.py inside the trading loop itself.
 
-:: Wait a couple seconds to ensure live_state.json is seeded
-timeout /t 3 /nobreak > nul
-
-:: Launch the main trading loop
-start "Titan-Q Master Brain" cmd /c "D:\trader_env\Scripts\python.exe D:\Quant_Project\main_trading_loop.py"
+:: Launch the main trading loop. "cmd /k" keeps the window open if it exits,
+:: so an error stays readable. Everything is also logged to logs\titanq_*.log
+start "Titan-Q Master Brain" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\main_trading_loop.py"
 echo [OK] Master Trading Loop Armed.
 
-:: Launch the Web Dashboard server
-start "Titan-Q Web Dashboard" cmd /c "D:\trader_env\Scripts\python.exe D:\Quant_Project\dashboard_server.py"
+:: Launch the Web Dashboard server (localhost only)
+start "Titan-Q Web Dashboard" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\dashboard_server.py"
 echo [OK] Live Web Dashboard Running on http://localhost:5000
 
 echo.
 echo =======================================================
-echo SYSTEM LIVE. EXECUTING PAPER TRADES AGAINST LIVE TICKS.
+echo SYSTEM LIVE. PAPER TRADING DURING NSE HOURS (09:15-15:30 IST).
 echo To safely shut down, close all command windows.
 echo =======================================================
 pause

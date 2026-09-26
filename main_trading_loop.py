@@ -197,7 +197,7 @@ async def live_trading_orchestrator(engine: ExecutionEngine):
             # STEP C.2: DEEP LOB FORECAST (Phase 18)
             # =========================================================
             # Generate a mock 50-tick lookback window for the transformer
-            lob_window = torch.randn(1, 50, 4, 10, dtype=torch.float64)
+            lob_window = torch.randn(1, 50, 4, 10, dtype=torch.float32)
             with torch.no_grad():
                 forecast_logits = lob_transformer(lob_window)
                 forecast_probs = torch.softmax(forecast_logits, dim=-1)[0].numpy()

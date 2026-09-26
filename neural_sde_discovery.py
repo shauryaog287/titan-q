@@ -66,7 +66,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-torch.set_default_dtype(torch.float64)
+# NOTE: this module used to call torch.set_default_dtype(torch.float64) at import,
+# which silently turned every model built afterwards (the Phase 18 transformer
+# included) into float64. NeuralSDE is now float64 on its own; the global default
+# is only set when the self-tests run (see __main__ below).
 
 __all__ = [
     "simulate_ou", "simulate_sde", "ou_exact_mle", "ou_euler_mle",
@@ -194,11 +197,16 @@ class NeuralSDE(nn.Module):
         self.f = _mlp(d_in, hidden, depth)
         self.g = _mlp(d_in, hidden, depth)
         self.x_loc, self.x_scale, self.t_scale = float(x_loc), float(x_scale), float(t_scale)
+        # Always float64, independent of torch's global default dtype. Importing
+        # this module no longer changes that default for everyone else.
+        self.double()
 
     def _inp(self, x: torch.Tensor, t: Optional[torch.Tensor]) -> torch.Tensor:
+        x = torch.as_tensor(x, dtype=torch.float64)
         z = ((x - self.x_loc) / self.x_scale).reshape(-1, 1)
         if self.td:
-            tt = torch.zeros_like(z) if t is None else (t / self.t_scale).reshape(-1, 1)
+            tt = (torch.zeros_like(z) if t is None
+                  else (torch.as_tensor(t, dtype=torch.float64) / self.t_scale).reshape(-1, 1))
             z = torch.cat([z, tt], dim=1)
         return z
 
@@ -731,6 +739,7 @@ def _main(path: str = "D:/Quant_Project/neural_sde_ou.png") -> None:
 
 
 if __name__ == "__main__":
+    torch.set_default_dtype(torch.float64)
     torch.set_num_threads(max(1, __import__("os").cpu_count() or 1))
     t0 = time.time()
     _run("GROUND TRUTH AND GRADIENTS", [

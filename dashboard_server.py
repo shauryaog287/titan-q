@@ -5,46 +5,54 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 DASHBOARD_HTML = r"C:\Users\jiten\titan-q-dashboard\index.html"
 STATE_FILE = r"D:\Quant_Project\dashboard_state.json"
 
+# Localhost only. Binding 0.0.0.0 exposed the account state to the whole LAN.
+HOST, PORT = "127.0.0.1", 5000
+
+DEFAULT_STATE = {
+    "current_pnl": 0.0,
+    "toxicity_score": 0.0,
+    "quantum_assets": [],
+    "recent_trades": []
+}
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Enable CORS
-        self.send_response(200)
+    def _send(self, code, content_type, body):
+        self.send_response(code)
         self.send_header('Access-Control-Allow-Origin', '*')
-        
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-type', content_type)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
         if self.path == '/':
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
             if os.path.exists(DASHBOARD_HTML):
                 with open(DASHBOARD_HTML, 'rb') as f:
-                    self.wfile.write(f.read())
+                    self._send(200, 'text/html', f.read())
             else:
-                self.wfile.write(b"Dashboard HTML not found.")
-                
+                self._send(404, 'text/plain', b"Dashboard HTML not found.")
+
         elif self.path == '/api/live_state':
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
+            body = None
             if os.path.exists(STATE_FILE):
                 with open(STATE_FILE, 'rb') as f:
-                    self.wfile.write(f.read())
-            else:
-                default_data = json.dumps({
-                    "current_pnl": 500000.0,
-                    "toxicity_score": 0.0,
-                    "quantum_assets": [],
-                    "recent_trades": []
-                })
-                self.wfile.write(default_data.encode('utf-8'))
+                    body = f.read()
+            if not body:
+                body = json.dumps(DEFAULT_STATE).encode('utf-8')
+            self._send(200, 'application/json', body)
+
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send(404, 'text/plain', b"Not found.")
 
     def log_message(self, format, *args):
         pass # Suppress logs to keep command prompt clean
 
+
 if __name__ == "__main__":
     print("==================================================")
     print("TITAN-Q DASHBOARD SERVER RUNNING")
-    print("Open your browser to: http://localhost:5000")
+    print("Open your browser to: http://localhost:%d" % PORT)
     print("==================================================")
-    server = HTTPServer(('0.0.0.0', 5000), DashboardHandler)
+    server = HTTPServer((HOST, PORT), DashboardHandler)
     server.serve_forever()
