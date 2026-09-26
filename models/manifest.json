@@ -1,0 +1,152 @@
+{
+  "created": "2026-09-26T21:25:46",
+  "asof": "2026-09-26",
+  "data_end": "2026-09-25",
+  "components": {
+    "regime_hmm": {
+      "file": "regime_hmm.pkl",
+      "n_states": 4,
+      "labels": [
+        "HIGH_VOL",
+        "BULL",
+        "SIDEWAYS",
+        "BEAR"
+      ],
+      "use_volume": false,
+      "features": [
+        "return",
+        "log_rv"
+      ],
+      "train_start": "2014-11-03",
+      "train_end": "2026-09-25",
+      "n_obs": 2929,
+      "log_likelihood": -4833.373924860677,
+      "bic": 9946.132421860324,
+      "restart_spread": 7.87946191849187e-07,
+      "expected_dwell_days": [
+        26.6,
+        44.7,
+        20.4,
+        21.1
+      ],
+      "stationary_distribution": [
+        0.121,
+        0.319,
+        0.244,
+        0.315
+      ],
+      "filtered_vs_viterbi_disagreement": 0.0621,
+      "bic_by_k": {
+        "2": 13315.7,
+        "3": 11151.0,
+        "4": 9946.1
+      },
+      "regime_at_train_end": "BULL",
+      "regime_confidence": 0.998,
+      "state_ann_return": [
+        0.1282,
+        0.1148,
+        0.1038,
+        0.0345
+      ],
+      "state_ann_vol": [
+        0.264,
+        0.0867,
+        0.1615,
+        0.1199
+      ],
+      "status": "ok",
+      "seconds": 323.7,
+      "file_sha256": "4cba5d4274a953f6038d57414ca4df3bcdbeb78014178ad9daca30869bd94e18"
+    },
+    "neural_sde": {
+      "file": "neural_sde.pt",
+      "state": "log NIFTY close, time unit = years (outputs are annualised)",
+      "train_start": "2016-07-07",
+      "train_end": "2026-09-25",
+      "span_years": 10.0,
+      "holdout_nll_neural": -3.29657,
+      "holdout_nll_gbm": -3.32287,
+      "neural_beats_gbm_out_of_sample": false,
+      "enabled": false,
+      "rule": "use the network's drift/diffusion only if it beats a constant-coefficient GBM on held-out data; otherwise use the GBM (sample) estimates",
+      "drift_now_annual": 0.1704,
+      "diffusion_now_annual": 0.1307,
+      "sample_drift_annual": 0.1021,
+      "sample_vol_annual": 0.1621,
+      "state_clamped_to_support": false,
+      "status": "ok",
+      "seconds": 133.7,
+      "file_sha256": "79dbc5d35276c7c990a3de627b17de3d2be21091a6bd7439bebffe82d102eb2a"
+    },
+    "ppo_policy": {
+      "policy_file": "master_ai_brain_sortino.zip",
+      "policy_sha256": "10025e187ca348fa4c730b11432f94dde37d793def2bc33b74bbb69deeab9b80",
+      "obs_rms_file": "ppo_obs_rms.npz",
+      "trained_timesteps": 77001856,
+      "actions": {
+        "0": "Sell (risk off)",
+        "1": "Buy (risk on)"
+      },
+      "train_frame_dates": [
+        "2015-04-08",
+        "2021-03-31"
+      ],
+      "obs_rms_note": "rebuilt by replaying the training frames; price features exact, reward-state features approximate",
+      "evaluation": {
+        "oos_start": "2021-04-01",
+        "oos_end": "2026-09-25",
+        "pct_days_long": 0.301,
+        "switches": 482,
+        "buy_and_hold": {
+          "days": 1354,
+          "ann_return": 0.0852365094925651,
+          "ann_vol": 0.1368830334438286,
+          "sharpe": 0.6226959422808438,
+          "sortino": 0.8695349705050623,
+          "total_log_return": 0.45797711846402045,
+          "max_drawdown_log": 0.1891015621900909,
+          "down_days": 633
+        },
+        "long_flat": {
+          "days": 1354,
+          "ann_return": -0.07591273494810842,
+          "ann_vol": 0.07020454691712434,
+          "sharpe": -1.0813079534253323,
+          "sortino": -1.4841428508879144,
+          "total_log_return": -0.4078803298402318,
+          "max_drawdown_log": 0.42175345629775535,
+          "down_days": 459
+        },
+        "long_short": {
+          "days": 1354,
+          "ann_return": -0.23750865590281448,
+          "ann_vol": 0.13893950924192153,
+          "sharpe": -1.7094392890740988,
+          "sortino": -2.3145882205472748,
+          "total_log_return": -1.276137778144474,
+          "max_drawdown_log": 1.3562199921581903,
+          "down_days": 772
+        },
+        "beats_buy_and_hold": false,
+        "rule": "enable only if long/flat Sortino > buy-and-hold Sortino, out of sample"
+      },
+      "enabled": false,
+      "status": "ok",
+      "seconds": 68.1,
+      "obs_rms_file_sha256": "b57ac0504d8607da885923bef6214d75ba73d16092c604ebee2cc13c0dd8f0a7"
+    },
+    "tft_lob_forecaster": {
+      "status": "unavailable",
+      "reason": "needs order-book depth; Yahoo Finance provides bars only"
+    },
+    "spoof_autoencoder": {
+      "status": "unavailable",
+      "reason": "needs order-book depth; Yahoo Finance provides bars only"
+    },
+    "hawkes_filter": {
+      "status": "unavailable",
+      "reason": "needs trade-by-trade timestamps; Yahoo Finance provides 1-minute bars only"
+    }
+  }
+}

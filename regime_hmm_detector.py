@@ -650,12 +650,25 @@ class RegimeModel:
         fr = self.hmm.fit(X, n_restarts=n_restarts)
         perm = canonical_permutation(self.hmm.means_, self.hmm.covars_, key="return")
         self.hmm.permute(perm)
-        self.labels_ = self._assign_labels()
         self.pipeline = pipeline
+        self.labels_ = self._assign_labels()
         return fr
 
-    def _assign_labels(self) -> List[Regime]:
+    def raw_means(self) -> np.ndarray:
+        """State means in the ORIGINAL feature units. The HMM is fitted on
+        standardised features, where 0 means "average", not "zero"."""
         mu = self.hmm.means_
+        if self.pipeline is not None and getattr(self.pipeline, "_fitted", False):
+            m, s = self.pipeline.scaler
+            d = mu.shape[1]
+            return mu * s[:d] + m[:d]
+        return mu
+
+    def _assign_labels(self) -> List[Regime]:
+        # Labels are decided on raw means. On standardised features the old
+        # test "mean return < 0" meant "below the sample average", which
+        # labelled a +7%/yr high-volatility state as CRASH.
+        mu = self.raw_means()
         K = self.n_states
         vol_rank = np.argsort(-mu[:, 1])
         stress = int(vol_rank[0])
