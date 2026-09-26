@@ -12,3 +12,6 @@ equity_curve_results.csv
 
 # Local tool config (personal settings, not project code)
 .claude.json
+
+# Run logs
+logs/

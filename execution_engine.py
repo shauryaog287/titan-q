@@ -432,7 +432,10 @@ class OrderManager:
                 timeout=self.submit_timeout,
             )
             rec.broker_order_id = bid
-            rec.state = OrderState.WORKING
+            # A fill can arrive before the acknowledgement (the paper broker fills
+            # synchronously inside place_order). Never overwrite it with WORKING.
+            if rec.state is OrderState.PENDING_NEW:
+                rec.state = OrderState.WORKING
             self._sent += 1
             self._reject_window.append((time.time(), False))
 

@@ -85,7 +85,7 @@ async def nse_whole_market_feed(lake: QuantDataLake):
             
             tick_count += 1
             if tick_count % 5 == 0:
-                logging.info(f"Broadcasting entire NIFTY 500 matrix ({N_STOCKS} updates) -> Google Drive. Index ^NSEI: \u20b9{base_prices[0]:,.2f}")
+                logging.info(f"Broadcasting entire NIFTY 500 matrix ({N_STOCKS} updates) -> Google Drive. Index ^NSEI: Rs. {base_prices[0]:,.2f}")
                 
             await asyncio.sleep(1.0) # 1 full market snapshot per second
                 

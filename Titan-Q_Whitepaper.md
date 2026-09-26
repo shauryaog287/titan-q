@@ -794,7 +794,7 @@ async def _do_reconcile(self) -> None:
         return
 ```
 
-> **Integration notes.** `PaperTradingBroker` implements three of the eight methods of the `BrokerClient` protocol (`authenticate`, `place_order`, `get_quote`). It lacks `logout`, `cancel_order`, `get_order_by_client_id`, `get_positions` and `get_working_orders`, and the reconciler has a workaround that reads `broker.positions` directly. Fills are never reported back through `on_fill`, so the engine's local positions stay at zero while the broker's grow. On a reading of the code (not verified at runtime), the 45-second reconcile loop should therefore see a discrepancy after the first fill and move the engine to `HALTED`, by its own rule. Separately, `yfinance` calls inside `async def place_order` and `get_quote` are synchronous network I/O. Each one blocks the single event loop, stalling both the engine and the orchestrator.
+> **Integration notes.** `PaperTradingBroker` implements three of the eight methods of the `BrokerClient` protocol (`authenticate`, `place_order`, `get_quote`). It lacks `logout`, `cancel_order`, `get_order_by_client_id`, `get_positions` and `get_working_orders`, and the reconciler has a workaround that reads `broker.positions` directly. Fills are never reported back through `on_fill`, so the engine's local positions stay at zero while the broker's grow. On a reading of the code (not verified at runtime), the 45-second reconcile loop should therefore see a discrepancy after the first fill and move the engine to `HALTED`, by its own rule. *Update, 26 September 2026:* this was confirmed at runtime. The engine halted 45 seconds after its first fill, then logged about seven "cancel failed ... no attribute 'cancel_order'" warnings per second. It is now fixed: the paper broker reports fills through `fill_callback = engine.on_fill`, and `OrderManager.submit` no longer overwrites a fill that arrives before the acknowledgement. Separately, `yfinance` calls inside `async def place_order` and `get_quote` are synchronous network I/O. Each one blocks the single event loop, stalling both the engine and the orchestrator.
 
 ### 5.3 The paper broker ledger
 
@@ -827,7 +827,7 @@ Four properties of this ledger matter for interpreting any displayed result:
 1. **Long-only.** A SELL without inventory is rejected, so short signals mostly fail.
 2. **No mark-to-market.** Equity is $E = C + \sum_i q_i p_i$, but only the cash $C$ is exported, under the name `current_pnl`. The saved dashboard state shows Rs. 4,75,109.55. That is cash after purchases, not a loss of Rs. 24,890.45.
 3. **Inconsistent costs.** The ledger charges 3 bps, while the Kelly sizer's `CostModel` assumes 13 bps of fees and STT plus half-spread plus square-root impact. Sizing and accounting should share one cost model.
-4. **Encoding hazard.** The file still contains the rupee glyph in the f-strings on lines 24, 46 and 60 (and `historical_backtest.py` on lines 69, 147 and 148). This is the same class of CP1252 failure recorded in the project's bug log, and these lines should use "Rs.".
+4. **Encoding hazard.** The file contained the rupee glyph in three f-strings, which is the same class of CP1252 failure recorded in the project's bug log. *Fixed 26 September 2026:* they now use "Rs.". `historical_backtest.py` still contains the glyph (lines 69, 147 and 148).
 
 ### 5.4 The multivariate GBM synthetic market feed
 
@@ -1012,7 +1012,7 @@ After that, the frozen code should run in paper trading before any capital is co
 | 23 EVT | `extreme_value_theory_risk.py` | Complete, profile CIs | No | ES drawn uniform(1%, 15%); trims 21.4% of signals |
 | 24 TE | `transfer_entropy_causality.py` | Complete, surrogate test | Partly | Raw biased TE on synthetic series; logged only |
 | 25 C++ transpiler | `alpha_cpp_transpiler.py` | Not reviewed | No | Tests blocked: no `g++` on PATH |
-| Engine | `execution_engine.py` | Complete state machine | Yes | Paper broker implements 3 of 8 protocol methods |
+| Engine | `execution_engine.py` | Complete state machine | Yes | Paper broker implements 3 of 8 protocol methods; fills now reach the engine, so it no longer self-halts (fixed 26 Sep) |
 | Broker | `paper_broker.py` | Working, long-only | Yes | Cash exported as "PnL"; no mark-to-market |
 | Feed | `nse_whole_market_feed.py` | Working | Separate process | Output not consumed by the loop |
 | Dashboard | `dashboard_server.py`, `index.html` | Working | Yes | Toxicity always 0; trade tape always empty |

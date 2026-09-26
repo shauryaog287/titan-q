@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import logging
 import random
@@ -27,7 +28,19 @@ from neural_sde_discovery import NeuralSDE
 from transfer_entropy_causality import transfer_entropy, discretize
 import torch
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Log to the console AND to a dated file, so a session can be diagnosed after its
+# window closes. force=True is needed because paper_broker.py (imported above)
+# already called basicConfig, which would otherwise make this call a no-op.
+os.makedirs(r"D:\Quant_Project\logs", exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(datetime.now().strftime(r"D:\Quant_Project\logs\titanq_%Y-%m-%d.log"), encoding="utf-8"),
+    ],
+    force=True,
+)
 
 async def live_trading_orchestrator(engine: ExecutionEngine):
     """The Ultimate Master Orchestrator tying all 16 Phases into a live pipeline."""
@@ -291,7 +304,7 @@ async def live_trading_orchestrator(engine: ExecutionEngine):
                     "MARUTI.NS", "BAJAJFINSV.NS", "TITAN.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS",
                     "TATASTEEL.NS", "WIPRO.NS", "NESTLEIND.NS", "TECHM.NS", "ONGC.NS", 
                     "POWERGRID.NS", "HINDALCO.NS", "M&M.NS", "NTPC.NS", "INDUSINDBK.NS",
-                    "GRASIM.NS", "DIVISLAB.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS", "JSWSTEEL.NS", 
+                    "GRASIM.NS", "DIVISLAB.NS", "TMPV.NS", "BAJAJ-AUTO.NS", "JSWSTEEL.NS", 
                     "BRITANNIA.NS", "ADANIPORTS.NS", "CIPLA.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS",
                     "COALINDIA.NS", "TATACONSUM.NS", "APOLLOHOSP.NS", "UPL.NS", "DRREDDY.NS", 
                     "EICHERMOT.NS", "BPCL.NS", "SBILIFE.NS", "SHREECEM.NS", "TATAPOWER.NS"
@@ -349,7 +362,8 @@ async def main():
     broker = PaperTradingBroker(initial_capital=500000.0)
     config = EngineConfig(algo_id="TITAN-Q-FUND", warmup_bars_required=0)
     engine = ExecutionEngine(broker=broker, config=config)
-    
+    broker.fill_callback = engine.on_fill
+
     await asyncio.gather(
         engine.run(),
         live_trading_orchestrator(engine)

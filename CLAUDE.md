@@ -32,10 +32,12 @@ keep both current when integration changes.
 - The dashboard is at http://localhost:5000 (stdlib `http.server`, not Flask).
   `index.html` loads React 18 from a CDN. In AUTO mode it falls back to a built-in
   simulator when the backend is down, so check the mode before trusting a screen.
-- Missing tools: `g++` is not on PATH, which blocks the Phase 25 transpiler tests, and git
-  is not installed yet. `.gitignore` is already prepared.
-- Baseline snapshot taken before switching from agy:
-  `D:\Quant_Project_backups\Quant_Project_2026-09-26_baseline.zip`
+- Git: `D:\Git\cmd\git.exe` (it may not be on PATH in older shells). The baseline commit
+  from the switch away from agy is `70e8951`; there is also a zip at
+  `D:\Quant_Project_backups\Quant_Project_2026-09-26_baseline.zip`.
+- Logs: `main_trading_loop.py` writes `logs\titanq_YYYY-MM-DD.log` (UTF-8, git-ignored).
+  Read it first when diagnosing a session.
+- Missing tool: `g++` is not on PATH, which blocks the Phase 25 transpiler tests.
 
 ## Architecture map
 
@@ -98,12 +100,18 @@ them yet. In `main_trading_loop.py`:
 - In the dashboard export, `current_pnl` is broker cash, not equity. `toxicity_score` is
   always 0.0 because `tox_values` is never defined, and `recent_trades` is always [].
 - `paper_broker.py`:
-  - implements 3 of the 8 `BrokerClient` methods, and fills never reach
-    `engine.on_fill`, so position mismatches in reconciliation are expected;
-  - is long-only;
-  - still has the rupee glyph on lines 24, 46 and 60. The same problem is in
-    `historical_backtest.py` (69, 147, 148), and `nse_whole_market_feed.py` line 88
-    uses "\u20b9".
+  - implements 3 of the 8 `BrokerClient` methods (no `cancel_order`,
+    `get_positions`, etc.);
+  - reports fills through `broker.fill_callback = engine.on_fill`, wired in `main()`.
+    Before 2026-09-26 it did not, so the engine halted 45 s after the first fill and
+    then logged about 7 "cancel failed" warnings per second. That flood is the
+    "many errors" seen on Friday 2026-09-25;
+  - is long-only: random SELLs of unheld stocks log "INSUFFICIENT SHARES" at ERROR;
+  - burns cash fast: with random 1-share buys, Rs. 5,00,000 lasts about 10 minutes,
+    after which every BUY logs "INSUFFICIENT FUNDS";
+  - `historical_backtest.py` still has the rupee glyph (lines 69, 147, 148).
+- TATAMOTORS.NS is dead on Yahoo after the Tata Motors demerger. The ticker list now uses
+  TMPV.NS.
 - The yfinance calls inside async methods are blocking and stall the shared event loop.
 - Annealer indices map to a hard-coded NIFTY_50 list of real .NS tickers. An earlier fake
   ticker, BASKET-TECH-4, caused Yahoo 404s.
@@ -118,5 +126,7 @@ them yet. In `main_trading_loop.py`:
   assumptions and limits.
 - Prefer replacing a placeholder in the loop with the real module call over adding new
   modules.
-- Until git is installed, copy a file to `D:\Quant_Project_backups` before a non-trivial
-  edit.
+- Commit before and after every change. Do not commit runtime state or logs; they are
+  git-ignored.
+- The user wants Claude to run commands, installs and setup steps itself rather than
+  handing them commands to type. Destructive actions still need confirmation first.

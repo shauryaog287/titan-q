@@ -16,12 +16,15 @@ class PaperTradingBroker:
         self.positions = {}
         self.trade_history = []
         # Zerodha STT + Exchange + Brokerage is roughly 0.03% for Intraday (MIS)
-        self.brokerage_rate = 0.0003 
+        self.brokerage_rate = 0.0003
+        # Set to ExecutionEngine.on_fill so the engine's position ledger sees our fills.
+        # Without it the engine's reconciler finds a mismatch and halts all trading.
+        self.fill_callback = None
         
     async def authenticate(self):
         logging.info("=========================================")
         logging.info(f" PAPER TRADING ENGINE ONLINE")
-        logging.info(f" Virtual Capital: ₹{self.capital:,.2f}")
+        logging.info(f" Virtual Capital: Rs. {self.capital:,.2f}")
         logging.info("=========================================")
         return "PAPER_TOKEN"
         
@@ -43,7 +46,7 @@ class PaperTradingBroker:
         
         if side == "BUY":
             if self.capital < (trade_value + fee):
-                logging.error(f"Paper Broker: INSUFFICIENT FUNDS. Need ₹{trade_value:,.2f}, have ₹{self.capital:,.2f}")
+                logging.error(f"Paper Broker: INSUFFICIENT FUNDS. Need Rs. {trade_value:,.2f}, have Rs. {self.capital:,.2f}")
                 return None
             self.capital -= (trade_value + fee)
             self.positions[symbol] = self.positions.get(symbol, 0) + qty
@@ -57,7 +60,9 @@ class PaperTradingBroker:
             self.positions[symbol] -= qty
             
         order_id = f"PAPER_{int(time.time())}"
-        logging.info(f"[PAPER TRADE] {side} {qty} {symbol} @ ₹{live_price:.2f} | Fee: ₹{fee:.2f} | Balance: ₹{self.capital:,.2f}")
+        logging.info(f"[PAPER TRADE] {side} {qty} {symbol} @ Rs. {live_price:.2f} | Fee: Rs. {fee:.2f} | Balance: Rs. {self.capital:,.2f}")
+        if self.fill_callback is not None:
+            self.fill_callback(intent.client_order_id, qty, live_price)
         return order_id
 
     async def get_quote(self, symbol: str):
