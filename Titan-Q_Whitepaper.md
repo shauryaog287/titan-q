@@ -6,6 +6,8 @@
 **Classification:** Internal
 
 > **How to read this paper.** Each phase is presented in three layers. The first is the financial and mathematical theory. The second is the Python implementation in the phase module, with code excerpts copied verbatim from the files (indentation removed). The third is an **integration status** note stating what the live orchestrator `main_trading_loop.py` actually does with that module today. The research modules are considerably more mature than their integration: most ship with self-tests against known ground truth, but several are represented in the live loop by placeholders. Where this paper and the code disagree, the code is authoritative. Section 6 re-examines the historical backtest, Section 7 tabulates the status of every phase, and Section 8 is the roadmap.
+>
+> **Update, 27 September 2026.** Sections 1 to 9 describe version 1 as it stood on 24 September. **Section 10 describes version 2**, which rebuilt the system along the Section 8 roadmap. In version 2 every model is either fed real market data or reported as unavailable, and each learned model is used only if it beats a simple baseline out of sample. Section 10 also reports a genuine walk-forward backtest.
 
 ---
 
@@ -34,7 +36,8 @@ Section 8 sets out the work needed to close that gap.
 7. Integration Status Matrix
 8. Roadmap to a Defensible Live System
 9. Conclusion
-10. References
+10. Version 2: the Integrated System (September 2026)
+11. References
 
 Appendices: A. Notation; B. File map; C. Reproducing the numbers in this paper
 
@@ -1074,7 +1077,185 @@ The integrated system is not yet a trading system in the sense its documentation
 
 ---
 
-## 10. References
+## 10. Version 2: the Integrated System (September 2026)
+
+Version 2 follows the Section 8 roadmap, and one principle governs it: **every model is either fed real market data or reported as unavailable, and a learned model drives decisions only if it beats a simple baseline on data it never saw.** This section records what changed, what the retrained models showed, how the decision layer now works, and what it earned in a walk-forward backtest.
+
+### 10.1 Data: what exists, and what that permits
+
+The live data source is Yahoo Finance through `yfinance`, wrapped by `market_data.py`:
+
+| Data | Depth | Used for |
+|---|---|---|
+| Daily OHLCV, 50 stocks and NIFTY | 12 years, dividend- and split-adjusted | regime, drift, covariance, alpha, tail risk, backtest |
+| 1-minute bars, same 51 symbols | the last ~5 sessions from Yahoo; every completed session is archived locally, so history grows by one session a day | intraday prices, VPIN, replay mode |
+| Order-book depth | none | nothing |
+| Trade-by-trade prints | none | nothing |
+
+The last two rows decide three components. The Phase 18 transformer and the Phase 16 spoofing autoencoder consume order-book depth, and the Phase 14 Hawkes filter consumes trade timestamps. Rather than feeding them noise, as version 1 did, version 2 reports them as **unavailable**, and says so in the log, the dashboard and the model manifest. Enabling them requires a depth feed, such as the Zerodha Kite websocket (five levels), recorded for long enough to train on. VPIN, the other half of Phase 14, is defined on volume buckets and works on bar data through bulk volume classification, so it is live.
+
+Look-ahead is prevented structurally. Anything that decides trades for session $D$ receives daily bars through `close_panel(..., before=D)`. The replay feed never returns a bar later than its own clock, and its self-tests assert this.
+
+### 10.2 The learned models, retrained and judged out of sample
+
+`train_models.py` trains each model on real NIFTY data up to the day before training. It scores each one against a simple baseline on held-out data, and records the result and a pre-set decision rule in `models/manifest.json`.
+
+**Phase 11: regime HMM (on).** The first retraining exposed two problems.
+
+- *NIFTY volume made EM unstable.* The log-likelihood varied by about 1,000 across random restarts, and the chosen fit contained a "regime" lasting 1.2 days on average. Without volume, every restart converged to the same optimum.
+- *A labelling bug.* The HMM is fitted on standardised features, where zero means "average", but the CRASH label tested the standardised mean return against zero. A regime returning +7 to 8% a year was therefore labelled CRASH, which in version 1's design would have liquidated the book about one day in five. Labels are now decided on raw means (`RegimeModel.raw_means`).
+
+The fitted model (return and log realised variance, $K=4$ chosen by BIC with a minimum expected dwell of five days) has four regimes:
+
+| Regime | Share of days | Expected dwell | Annual return | Annual volatility | Exposure multiplier |
+|---|---|---|---|---|---|
+| BULL | 32% | 45 days | +11.5% | 8.7% | 1.00 |
+| SIDEWAYS | 24% | 20 days | +10.4% | 16.2% | 0.75 |
+| BEAR | 32% | 21 days | +3.5% | 12.0% | 0.50 |
+| HIGH_VOL | 12% | 27 days | +12.8% | 26.4% | 0.50 |
+
+Over 2015-2026, NIFTY's most volatile regime still averaged a positive return, so the data does not support a "crash" regime to liquidate into. The regime layer therefore works as a volatility-regime exposure scaler. The live filter is the causal forward recursion with hysteresis, not Viterbi (Section 4.4).
+
+**Phase 21: neural SDE (off).** The network was fitted on the first 80% of ten years of log NIFTY and scored on the last 20% against a constant-coefficient GBM. Its held-out transition negative log-likelihood was $-3.2966$, against $-3.3229$ for the GBM, so the GBM is better. This is the overfitting the module's own self-tests predict for weak drifts (Section 2.2). At the current index level the network claims a 17.0% drift against a 10.2% sample mean. Under the rule "use the network only if it beats the GBM out of sample", version 2 uses the GBM estimates ($\mu = 10.2\%$, $\sigma = 16.2\%$).
+
+**Phase 5: PPO policy (off).** Three facts emerged from `local_ai_trader.py` and the saved model:
+
+- The policy is a *daily NIFTY timing* model with two actions (Sell=0, Buy=1). Version 1's loop decoded Buy as HOLD.
+- Its observation is 30 days of closing prices and differences, plus five reward-state values. The pandas_ta indicators computed in the training script never reached it.
+- Its `VecNormalize` statistics were never saved, so without them every observation is un-normalised.
+
+The statistics were rebuilt by replaying the training frames through the policy. This is exact for the price features and approximate for the five reward-state features. Evaluated from April 2021 to September 2026, which the policy never trained on, a decision taken at day $t$ earns the return from $t+1$ to $t+2$, matching gym-anytrading's execution timing. With costs:
+
+| | Annual return | Sharpe | Sortino | Max drawdown (log) |
+|---|---|---|---|---|
+| NIFTY buy-and-hold | +8.5% | 0.62 | 0.87 | 0.19 |
+| PPO long/flat | -7.6% | -1.08 | -1.48 | 0.42 |
+| PPO long/short | -23.8% | -1.71 | -2.31 | 1.36 |
+
+The policy was long only 30% of days and switched 482 times. The rebuilt normalisation may account for part of this, and there is no way to recover the original. Either way, the model as it can be run today loses money out of sample, so it is off.
+
+**Phase 18: transformer.** Its own harness, re-run for this paper (Section 2.1), scores 0.494 to 0.551 macro-F1, significantly below a five-feature logistic regression, and the "about 63%" figure was the oracle's. It is unavailable in any case without depth data.
+
+### 10.3 The version 2 decision layer
+
+`titanq_brain.py` builds a **daily context** before each session from data dated before it, then plans trades during the session.
+
+**Expected returns.** The market's drift $\mu_m$ comes from the GBM (or the neural SDE, if it ever wins). Each stock's expected return adds a baseline cross-sectional momentum alpha, converted to return units with Grinold's rule:
+
+$$m_i = \ln\frac{P_{i,t-21}}{P_{i,t-252}}, \quad z_i = \mathrm{clip}\left( \frac{m_i - \bar m}{s_m}, -3, 3 \right), \quad \alpha_i = \mathrm{IC} \cdot \sigma_i \cdot z_i \cdot \sqrt{12}, \quad \mu_i = \beta_i \mu_m + \alpha_i,$$
+
+with $\mathrm{IC} = 0.04$ per month. Momentum is a documented factor in the literature and serves here as a stated baseline, not a claimed proprietary edge. Section 10.5 shows what it earned.
+
+**Risk.** The covariance is a Ledoit-Wolf shrinkage estimate on one year of daily returns (annualised). Shrinkage addresses the Marchenko-Pastur noise problem of Section 3.2 without inverting a noisy sample matrix.
+
+**Selection (Phase 20).** The best-Sharpe equal-weight subset of $K = 4$ from the eligible universe is found by **exact enumeration** of $\binom{50}{4} = 230{,}300$ subsets in about 0.1 s. The swap annealer is kept for larger $K$.
+
+The first backtest trial showed that re-optimising from scratch every day flips the selection on estimation noise: 106 trades in 60 days, an annualised turnover of 3,166%. Version 2 therefore adds **incumbent hysteresis**. If the current holdings form a full selection, they are kept unless the new best subset's model Sharpe beats theirs by 20%:
+
+$$\text{switch} \iff S(x^{\ast}) > S(x_{\text{held}}) + 0.2\,|S(x_{\text{held}})|.$$
+
+In the same trial this cut turnover to 665% and fees by 80%.
+
+**Weights and sizing (Phases 12 and 4).** HRP (Section 3.2) weights the four names. The Kelly sizer (Section 3.3) now sizes the **actual basket**, not a random proxy. It uses $\mu_p = w^\top \mu$ and $\sigma_p = \sqrt{w^\top \Sigma w}$, a ten-year estimation span, quarter Kelly, a cap of 100% of equity, and a cost model built from the same delivery cost rates the paper broker charges.
+
+**Tail risk (Phase 23).** A POT/GPD model gives the 99% one-day expected shortfall of the basket's historical loss series and of the index. Version 1 halved size when "ES exceeded 12%" with no level or horizon. A 99% one-day ES for a large-cap basket is typically 3-6%, so that trigger could never fire. Version 2 halves exposure when the basket's ES exceeds 1.5 times the index's: the basket is materially fatter-tailed than the market.
+
+**Exposure.** The fraction of equity to invest is
+
+$$E = \min\left( 1, \; f_{\text{Kelly}} \times m_{\text{regime}} \times m_{\text{PPO}} \times m_{\text{EVT}} \right), \qquad \text{target}_i = E \cdot w_i^{\text{HRP}}.$$
+
+On 25 September 2026, for example, this came to $E = 27.3\%$ across DIVISLAB, TITAN, LT and INDUSINDBK.
+
+**Intraday (Phase 14, VPIN).** Each held or targeted stock's VPIN is computed from 1-minute bars (buckets of 1/50 of median daily volume, bulk volume classification, a 50-bucket window). It is scored as a percentile of that stock's VPIN over earlier sessions, through `ToxicityScore` with the Hawkes weight set to zero. Buys are held back when the score exceeds 0.90. Sells never are, since reducing risk takes priority. In a simulated session the gate held back an INDUSINDBK buy at a toxicity of 0.94.
+
+**Rebalancing.** Target shares are $\lfloor E \cdot w_i \cdot \text{equity} / p_i \rfloor$. A trade is sent only if it passes five checks:
+
+- it is at least Rs. 2,000, and the position is more than 20% off target;
+- the symbol has not traded in the last 15 minutes;
+- cash covers it, with sells executing first;
+- for buys, it is not within the last 10 minutes of the session.
+
+Full exits are always allowed. Orders go to the execution engine as market orders, and exits are marked reduce-only.
+
+**Transfer entropy (Phase 24)** runs daily as a *diagnostic*, with 100 circular-shift surrogates per test, between the index and each holding. On the live context of 25 September no index-to-stock flow was significant at 5%. One stock-to-index test came in at $p = 0.04$, which is expected by chance across eight tests.
+
+### 10.4 Execution and operations
+
+- **Engine.** The paper broker now reports every fill through `engine.on_fill`. In version 1 it did not: the engine halted itself 45 seconds after the first fill and then logged about seven "cancel failed" warnings a second. That flood was the wall of errors seen on 25 September 2026. The order manager also no longer overwrites a fill that arrives before its acknowledgement.
+- **Broker.** The broker fills at the feed's last price plus or minus 5 bps, and never calls Yahoo itself, so no blocking I/O runs on the event loop. It implements the full `BrokerClient` protocol, raises on rejections, and charges the equity-delivery cost stack. A round trip costs about 0.23% plus slippage:
+
+| Charge | Rate (APPROX, 2025) |
+|---|---|
+| Securities transaction tax | 0.1% on buys and sells |
+| Stamp duty | 0.015% on buys |
+| Exchange transaction charge | 0.00297% |
+| SEBI fee | Rs. 10 per crore |
+| GST | 18% of brokerage + exchange + SEBI |
+| Brokerage | zero (discount-broker delivery) |
+
+- **Account.** The live paper account persists in `paper_account.json`. The strategy holds positions for days, so an account that reset every morning, as version 1's did, would rebuy the whole book daily.
+- **Lifecycle.** Live mode is one process per trading day, trading 09:15-15:30 IST and exiting 15 minutes after the close. On weekends and after hours it exits at once. An OS-level lock file stops a second instance. This replaces version 1's kill switch, which covered only 22:40-22:59 and let trading resume at 23:00.
+- **Replay mode** replays any archived session on a throwaway account, so the system can be watched outside market hours. Replaying 25 September: four buys at the open, no churn, Rs. 152 of fees, +Rs. 320.76 at the close.
+- **Dashboard.** `current_pnl` is now equity minus initial capital, and toxicity and the trade tape are populated. The state file adds equity, cash, positions, regime, target exposure and component status, and is written atomically. The server binds to localhost only.
+
+### 10.5 Walk-forward backtest
+
+<!-- BACKTEST_RESULTS_BEGIN -->
+**Baseline v2 configuration** (`backtest_daily.py`, 2 January 2019 to 25 September 2026, 1,908 trading days, Rs. 5,00,000 start). Every decision uses only earlier data, the regime model is refitted each January on earlier data only, fills are at the day's open, and the full cost stack applies:
+
+| | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Total return |
+|---|---|---|---|---|---|---|
+| **Titan-Q v2 baseline** | 2.2% | 3.4% | 0.65 | 0.98 | 6.8% | 17.9% |
+| NIFTY 50 buy-and-hold (price index) | 10.6% | 17.3% | 0.67 | 0.92 | 38.4% | 114.4% |
+| Equal-weight universe buy-and-hold | 16.6% | 16.9% | 1.00 | 1.37 | 36.7% | 220.6% |
+| NIFTY at the strategy's average exposure | 1.7% | 2.6% | 0.67 | 0.92 | 6.8% | 13.9% |
+
+The strategy was 15.2% invested on average and fully in cash on 375 days. It made 520 trades, paid Rs. 6,866 in fees and turned over 151% of equity a year.
+
+**What this says.** The baseline does not demonstrate an edge. Its Sharpe ratio (0.65) matches NIFTY's (0.67). Against NIFTY held at the same average exposure it earned 2.2% against 1.7% a year, a gap well inside estimation noise over under eight years. Two design choices explain the low exposure:
+
+- the Kelly sizer shrinks the *entire* expected return, including the market's long-run premium, toward zero with a 3% prior;
+- the early regime models, trained on only four years of data, often read the market as BEAR or CRASH.
+
+The equal-weight universe's 1.00 Sharpe ratio is flattered by survivorship, because the list is today's large caps, and is not an achievable benchmark.
+
+Work toward a profitable configuration continues from this baseline. Candidate changes are selected on 2015-2020 data only and confirmed once on 2021-2026, so that the backtest is not used to tune the strategy it is testing.
+<!-- BACKTEST_RESULTS_END -->
+
+### 10.6 Integration status, version 2
+
+| Phase | Status in v2 | Fed by |
+|---|---|---|
+| 4 Kelly | **on**, sizes the actual basket | basket mean and covariance, ten-year span |
+| 5 PPO | off (loses out of sample) | would be: NIFTY daily closes |
+| 11 HMM | **on**, volatility-regime scaler | NIFTY daily return and realised variance |
+| 12 HRP | **on** | Ledoit-Wolf covariance of the selection |
+| 13 Copula | not used | - |
+| 14 VPIN | **on**, intraday buy gate | real 1-minute bars |
+| 14 Hawkes | unavailable | needs trade timestamps |
+| 16 Spoof AE | unavailable | needs order-book depth |
+| 17 Signatures | not used | - |
+| 18 TFT | unavailable (and lost to a logistic baseline) | needs order-book depth |
+| 20 Selection | **on**, exact enumeration plus hysteresis | momentum alpha, GBM drift, betas |
+| 21 Neural SDE | off (loses to GBM out of sample) | GBM estimates used instead |
+| 22 HJB | not used (market-making model; the strategy trades directionally) | - |
+| 23 EVT | **on**, relative ES trim | basket and index daily losses |
+| 24 Transfer entropy | **on**, diagnostic with surrogates | daily returns |
+| Engine / broker | **on**, fills reported, costs realistic | feed prices |
+
+### 10.7 What would make it more advanced
+
+In order of expected value:
+
+1. **Alpha research.** Everything downstream of the expected returns is now sound, but the expected returns are a baseline. A genuine edge has to be found and validated with the same walk-forward harness.
+2. **Point-in-time universe.** Historical NIFTY 50 membership would remove the survivorship bias.
+3. **Cash management.** Idle cash in a liquid fund, which the backtest does not credit.
+4. **A depth feed.** A recorded Kite depth feed would make the transformer, spoofing autoencoder and Hawkes filter trainable on real data.
+5. **Intraday execution.** An optimal-execution schedule for larger orders, using the Section 5.1 control machinery with one side switched off.
+
+---
+
+## 11. References
 
 - Almgren, R. and Chriss, N. (2001). Optimal execution of portfolio transactions. *Journal of Risk* 3.
 - Avellaneda, M. and Stoikov, S. (2008). High-frequency trading in a limit order book. *Quantitative Finance* 8(3).
