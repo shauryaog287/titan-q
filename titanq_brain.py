@@ -89,7 +89,9 @@ class DailyContext:
     selection: List[str] = field(default_factory=list)
     selection_method: str = ""
     selection_sharpe: float = 0.0
-    hrp_weights: Dict[str, float] = field(default_factory=dict)
+    weighting: str = ""
+    basket_weights: Dict[str, float] = field(default_factory=dict)
+    basket_beta: float = 1.0
     basket_mu: float = 0.0
     basket_sigma: float = 0.0
     alpha_z: Dict[str, float] = field(default_factory=dict)
@@ -114,11 +116,15 @@ class DailyContext:
         return asdict(self)
 
     def summary(self) -> str:
-        sel = ", ".join(f"{s} {100 * w:.1f}%" for s, w in self.target_weights.items())
-        return (f"regime {self.regime} (x{self.regime_multiplier:.2f}), PPO {self.ppo_status}"
-                f" (x{self.ppo_multiplier:.2f}), market mu {100 * self.market_mu:.1f}% sigma "
-                f"{100 * self.market_sigma:.1f}% [{self.market_source}], Kelly f {self.kelly_f:.3f}"
-                f", EVT x{self.evt_multiplier:.2f} -> exposure {100 * self.exposure:.1f}% : {sel}")
+        top = sorted(self.target_weights.items(), key=lambda kv: -kv[1])[:5]
+        sel = ", ".join(f"{s} {100 * w:.1f}%" for s, w in top)
+        more = len(self.target_weights) - len(top)
+        return (f"regime {self.regime} (x{self.regime_multiplier:.2f}), PPO x{self.ppo_multiplier:.2f}"
+                f", market mu {100 * self.market_mu:.1f}% sigma {100 * self.market_sigma:.1f}% "
+                f"[{self.market_source}], basket sigma {100 * self.basket_sigma:.1f}%, Kelly f "
+                f"{self.kelly_f:.3f}, EVT x{self.evt_multiplier:.2f} -> exposure "
+                f"{100 * self.exposure:.1f}% in {len(self.target_weights)} stocks ({self.weighting}): "
+                f"{sel}{f' + {more} more' if more > 0 else ''}")
 
 
 def load_manifest() -> Dict:
@@ -353,28 +359,40 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
     alpha, z = momentum_alpha(window[valid].ffill(), vols, cfg)
     mu = betas * ctx.market_mu + alpha
 
-    # Phase 20 + Phase 12
-    sel_idx, ctx.selection_sharpe, ctx.selection_method = select_assets(
-        mu.to_numpy(), Sigma_all, cfg.n_select)
-    # incumbent hysteresis: re-optimising from scratch every day flips the
-    # selection on noise; only switch when the new subset is clearly better
-    inc = [s for s in (holdings or []) if s in valid]
-    if len(inc) == cfg.n_select and set(inc) != {valid[i] for i in sel_idx}:
-        from quantum_portfolio_annealer import sharpe as subset_sharpe
-        x = np.zeros(len(valid))
-        inc_idx = np.array(sorted(valid.index(s) for s in inc))
-        x[inc_idx] = 1.0
-        s_inc = subset_sharpe(x, mu.to_numpy(), Sigma_all)
-        if ctx.selection_sharpe <= s_inc + cfg.selection_switch_margin * abs(s_inc):
-            ctx.selection_method += (f"; kept holdings (best {ctx.selection_sharpe:.2f} vs held "
-                                     f"{s_inc:.2f}, margin {100 * cfg.selection_switch_margin:.0f}%)")
-            sel_idx, ctx.selection_sharpe = inc_idx, float(s_inc)
+    # Phase 20: which stocks
+    from quantum_portfolio_annealer import sharpe as subset_sharpe
+    if cfg.selection_mode == "optimize":
+        sel_idx, ctx.selection_sharpe, ctx.selection_method = select_assets(
+            mu.to_numpy(), Sigma_all, cfg.n_select)
+        # incumbent hysteresis: re-optimising from scratch every day flips the
+        # selection on noise; only switch when the new subset is clearly better
+        inc = [s for s in (holdings or []) if s in valid]
+        if len(inc) == cfg.n_select and set(inc) != {valid[i] for i in sel_idx}:
+            x = np.zeros(len(valid))
+            inc_idx = np.array(sorted(valid.index(s) for s in inc))
+            x[inc_idx] = 1.0
+            s_inc = subset_sharpe(x, mu.to_numpy(), Sigma_all)
+            if ctx.selection_sharpe <= s_inc + cfg.selection_switch_margin * abs(s_inc):
+                ctx.selection_method += (f"; kept holdings (best {ctx.selection_sharpe:.2f} vs held "
+                                         f"{s_inc:.2f}, margin {100 * cfg.selection_switch_margin:.0f}%)")
+                sel_idx, ctx.selection_sharpe = inc_idx, float(s_inc)
+    else:
+        sel_idx = np.arange(len(valid))
+        ctx.selection_sharpe = float(subset_sharpe(np.ones(len(valid)), mu.to_numpy(), Sigma_all))
+        ctx.selection_method = f"all {len(valid)} eligible stocks (no selection signal showed an edge)"
     sel = [valid[i] for i in sel_idx]
     ctx.selection = sel
-    from portfolio_hrp_allocator import HRPAllocator
+
+    # Phase 12: how much of each
     S_sel = Sigma_all[np.ix_(sel_idx, sel_idx)]
-    w = HRPAllocator(method="single", bisection="dendrogram").allocate(S_sel, labels=sel).weights
-    ctx.hrp_weights = {s: float(v) for s, v in zip(sel, w)}
+    if cfg.weighting == "hrp":
+        from portfolio_hrp_allocator import HRPAllocator
+        w = HRPAllocator(method="single", bisection="dendrogram").allocate(S_sel, labels=sel).weights
+    else:
+        iv = 1.0 / np.sqrt(np.diag(S_sel))
+        w = iv / iv.sum()
+    ctx.weighting = cfg.weighting
+    ctx.basket_weights = {s: float(v) for s, v in zip(sel, w)}
     ctx.alpha_z = {s: round(float(z[s]), 3) for s in sel}
     mu_sel = mu[sel].to_numpy()
     ctx.basket_mu = float(w @ mu_sel)
@@ -388,8 +406,12 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
 
     # Phase 4
     from fusion_and_sizing import CostModel, KellySizer
+    # The basket's return is beta x market + alpha. Its prior is centred on beta
+    # times the long-run market return (the alpha part's prior is centred on 0).
+    ctx.basket_beta = float(w @ betas[sel].to_numpy())
     sizer = KellySizer(kelly_fraction=cfg.kelly_fraction, prior_edge_vol=cfg.kelly_prior_edge_vol,
-                       max_leverage=cfg.max_exposure, max_position_weight=cfg.max_exposure)
+                       max_leverage=cfg.max_exposure, max_position_weight=cfg.max_exposure,
+                       prior_mean=ctx.basket_beta * cfg.prior_market_return)
     costs = CostModel(impact_coefficient=0.75, half_spread=cfg.slippage_bps / 1e4,
                       fees_bps=1e4 * (cfg.exchange_rate + cfg.sebi_rate + cfg.stamp_rate_buy / 2),
                       stt_bps=1e4 * cfg.stt_rate)
@@ -416,13 +438,14 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
                                                    * ctx.ppo_multiplier * ctx.evt_multiplier)))
     if not ctx.tradeable:
         ctx.exposure = 0.0
-    ctx.target_weights = {s: ctx.exposure * ctx.hrp_weights[s] for s in sel}
+    ctx.target_weights = {s: ctx.exposure * ctx.basket_weights[s] for s in sel}
 
-    # Phase 24 (diagnostic only)
+    # Phase 24 (diagnostic only): the five largest positions
     if with_te:
         try:
+            top = sorted(sel, key=lambda s: -ctx.basket_weights[s])[:5]
             ctx.transfer_entropy = te_diagnostics(logret[INDEX_SYMBOL].fillna(0.0).to_numpy(),
-                                                  logret[sel].fillna(0.0), sel, cfg)
+                                                  logret[top].fillna(0.0), top, cfg)
             ctx.components["transfer_entropy"] = "ok (diagnostic)"
         except Exception as exc:
             ctx.components["transfer_entropy"] = f"error: {exc}"
@@ -654,8 +677,11 @@ def _test_context_on_real_data() -> None:
     asof = daily[INDEX_SYMBOL].index[-1].date()          # pretend we trade the last cached day
     ctx = build_daily_context(daily, asof, 500_000.0)
     assert ctx.data_end < ctx.asof, "context used data from the traded day"
-    assert len(ctx.selection) == CONFIG.n_select
-    assert abs(sum(ctx.hrp_weights.values()) - 1.0) < 1e-9
+    if CONFIG.selection_mode == "optimize":
+        assert len(ctx.selection) == CONFIG.n_select
+    else:
+        assert len(ctx.selection) >= 40, len(ctx.selection)
+    assert abs(sum(ctx.basket_weights.values()) - 1.0) < 1e-9
     assert 0.0 <= ctx.exposure <= CONFIG.max_exposure
     assert abs(sum(ctx.target_weights.values()) - ctx.exposure) < 1e-9
     print(f"[ok] daily context on real data for {ctx.asof} (data to {ctx.data_end}, {ctx.seconds}s): "

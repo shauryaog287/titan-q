@@ -691,6 +691,7 @@ class KellySizer:
         max_leverage: float = 1.0,
         max_position_weight: float = 0.10,
         use_higher_moments: bool = True,
+        prior_mean: float = 0.0,
     ) -> None:
         if not 0.0 < kelly_fraction <= 1.0:
             raise ValueError("kelly_fraction must be in (0, 1]")
@@ -700,6 +701,11 @@ class KellySizer:
         self.max_leverage = float(max_leverage)
         self.max_position_weight = float(max_position_weight)
         self.use_higher_moments = bool(use_higher_moments)
+        # Centre of the prior on the true mu. Zero is right for an ALPHA (an edge
+        # over the market). For a position whose return includes the market
+        # premium, centre it on a long-run estimate of that premium; otherwise
+        # the posterior drags a well-established premium to nothing.
+        self.prior_mean = float(prior_mean)
 
     # -- component pieces -------------------------------------------------- #
 
@@ -710,7 +716,7 @@ class KellySizer:
 
     def posterior_mu(self, mu_hat: float, se: float) -> float:
         t2 = self.tau**2
-        return float(mu_hat * t2 / (t2 + se**2))
+        return float(self.prior_mean + (mu_hat - self.prior_mean) * t2 / (t2 + se**2))
 
     @staticmethod
     def growth_fraction(lam: float) -> float:

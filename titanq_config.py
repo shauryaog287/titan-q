@@ -76,7 +76,13 @@ class Config:
     replay_bars_per_second: float = 2.0    # replay speed (375 bars ~ 3 minutes)
 
     # ---- selection (Phase 20) and weights (Phase 12) -------------------------
-    n_select: int = 4                      # assets held
+    # Decided on 2015-2020 data before looking at 2021-2026 (reports/decision_2026-09-27.md):
+    # no selection signal showed an edge, so the default holds every eligible stock,
+    # weighted by inverse volatility. "optimize" is the original concentrated mode:
+    # the best-Sharpe n_select subset via exact enumeration / annealing.
+    selection_mode: str = "all"            # "all" | "optimize"
+    weighting: str = "inverse_vol"         # "inverse_vol" | "hrp"
+    n_select: int = 4                      # assets held in "optimize" mode
     selection_switch_margin: float = 0.20  # keep the current holdings unless the new best
                                            # subset's expected Sharpe beats theirs by 20%
                                            # (without this, daily re-optimisation churned
@@ -84,18 +90,25 @@ class Config:
     cov_lookback_days: int = 252           # covariance estimation window
     momentum_lookback_days: int = 252      # 12-1 momentum: 12 months...
     momentum_skip_days: int = 21           # ...skipping the most recent month
-    alpha_ic: float = 0.04                 # assumed information coefficient of the
-                                           # momentum score (monthly); drives the size
-                                           # of expected returns. A baseline, not an edge.
+    alpha_ic: float = 0.0                  # information coefficient of the momentum score
+                                           # (monthly). 0 = no alpha tilt: momentum showed
+                                           # no edge in development (IC t 0.52) and top-4
+                                           # momentum lost 8%/yr vs equal weight in test.
 
     # ---- sizing (Phase 4) ------------------------------------------------------
     kelly_fraction: float = 0.25           # quarter Kelly
-    kelly_prior_edge_vol: float = 0.03     # prior sd of the true annual edge
+    kelly_prior_edge_vol: float = 0.03     # prior sd of the true annual return
+    prior_market_return: float = 0.10      # prior mean of the market's annual return
+                                           # (NIFTY 1995-2020 compounded ~11%; set from
+                                           # pre-2021 history). The v2 baseline used 0,
+                                           # which kept the system ~85% in cash.
     max_exposure: float = 1.0              # never more than 100% of equity invested
 
     # ---- regime (Phase 11): exposure multiplier per regime ---------------------
+    # Routine regimes do not cut exposure: timing overlays lowered returns without
+    # improving Sharpe in development. CRASH and novel regimes remain hard limits.
     regime_multipliers: Dict[str, float] = field(default_factory=lambda: {
-        "BULL": 1.0, "SIDEWAYS": 0.75, "HIGH_VOL": 0.5, "BEAR": 0.5,
+        "BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 1.0, "BEAR": 1.0,
         "CRASH": 0.0, "UNKNOWN": 0.5,
     })
     novel_regime_multiplier: float = 0.5   # observation unlike every trained regime

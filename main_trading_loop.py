@@ -201,7 +201,9 @@ class Orchestrator:
             # the contract index.html reads
             "current_pnl": snap["pnl"],
             "toxicity_score": max(tox_vals) if tox_vals else 0.0,
-            "quantum_assets": [{"ticker": s, "w": w} for s, w in (ctx.hrp_weights.items() if ctx else [])],
+            # the dashboard shows up to 8 assets: send the 8 largest weights
+            "quantum_assets": [{"ticker": s, "w": w} for s, w in sorted(
+                (ctx.basket_weights.items() if ctx else []), key=lambda kv: -kv[1])[:8]],
             "recent_trades": [{"id": t["id"], "side": t["side"], "ticker": t["ticker"],
                                "price": t["price"], "qty": t["qty"], "ts": t["ts"]}
                               for t in self.broker.recent_trades()],
