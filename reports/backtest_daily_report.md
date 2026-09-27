@@ -4,22 +4,22 @@ Window 2019-01-02 to 2026-09-25 (1908 trading days), starting capital Rs. 500,00
 
 | | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Total return |
 |---|---|---|---|---|---|---|
-| **Titan-Q strategy** | 2.2% | 3.4% | 0.65 | 0.98 | 6.8% | 17.9% |
+| **Titan-Q strategy** | 5.9% | 10.7% | 0.59 | 0.81 | 24.0% | 54.3% |
 | NIFTY 50 buy-and-hold (price index) | 10.6% | 17.3% | 0.67 | 0.92 | 38.4% | 114.4% |
 | Equal-weight universe buy-and-hold | 16.6% | 16.9% | 1.00 | 1.37 | 36.7% | 220.6% |
-| NIFTY at the strategy's average exposure | 1.7% | 2.6% | 0.67 | 0.92 | 6.8% | 13.9% |
+| NIFTY at the strategy's average exposure | 7.7% | 12.1% | 0.67 | 0.92 | 28.5% | 74.9% |
 
-Average invested: 15.2% of equity; days fully in cash: 375; trades: 520 (0 rejected); fees: Rs. 6,866; annual turnover: 151% of equity.
+Average invested: 70.1% of equity; days fully in cash: 153; trades: 1944 (0 rejected); fees: Rs. 12,671; annual turnover: 251% of equity.
 
 | Year | Strategy | NIFTY | Equal weight |
 |---|---|---|---|
-| 2019 | 0.4% | 12.7% | 14.6% |
-| 2020 | -0.9% | 14.9% | 23.2% |
-| 2021 | 1.1% | 24.1% | 39.2% |
-| 2022 | -0.9% | 4.3% | 1.0% |
-| 2023 | 16.2% | 20.0% | 31.6% |
-| 2024 | 4.4% | 8.8% | 12.5% |
-| 2025 | 3.3% | 10.5% | 12.1% |
-| 2026 | -5.8% | -11.4% | -2.6% |
+| 2019 | 7.6% | 12.7% | 14.6% |
+| 2020 | -11.8% | 14.9% | 23.2% |
+| 2021 | 12.3% | 24.1% | 39.2% |
+| 2022 | 0.6% | 4.3% | 1.0% |
+| 2023 | 29.3% | 20.0% | 31.6% |
+| 2024 | 4.2% | 8.8% | 12.5% |
+| 2025 | 12.8% | 10.5% | 12.1% |
+| 2026 | -5.4% | -11.4% | -2.6% |
 
 Known biases: survivorship (today's universe applied to the past); NIFTY is a price index; stocks include dividends; cash earns 0%; no VPIN toxicity (no historical 1-minute data).
