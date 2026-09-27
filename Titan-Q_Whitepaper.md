@@ -1220,6 +1220,29 @@ The strategy was 15.2% invested on average and fully in cash on 375 days. It mad
 The equal-weight universe's 1.00 Sharpe ratio is flattered by survivorship, because the list is today's large caps, and is not an achievable benchmark.
 
 Work toward a profitable configuration continues from this baseline. Candidate changes are selected on 2015-2020 data only and confirmed once on 2021-2026, so that the backtest is not used to tune the strategy it is testing.
+
+**Signal research (`alpha_research.py`, `reports/alpha_research.md`).** Seven documented cross-sectional signals were tested monthly with a one-day implementation lag and full costs: 12-1 and 6-1 momentum, 1-month reversal, low volatility, low beta, 52-week-high proximity and trend. The protocol was fixed before any result was seen: development on 2015-2020, and a test on 2021-2026 that stayed blind until the decision had been written down and committed (`reports/decision_2026-09-27.md`, commit `33e441f`).
+
+- *Development:* no signal had a demonstrable edge. Mean rank ICs ran from -0.033 to +0.030, the best $|t|$ was 1.33, and no top-4 or top-8 portfolio differed significantly from the equal-weight universe. No timing overlay on NIFTY improved Sharpe: buy-and-hold scored 0.69, a 200-day trend filter 0.61 and volatility targeting 0.60. Weighting the whole universe, inverse volatility (Sharpe 0.96) matched equal weight (0.95), and HRP trailed (0.78).
+- *Test, revealed once:* the decision held. Concentrated picks did worse. The top-4 12-1 momentum portfolio, the version 1 and 2 style of selection, trailed the equal-weight universe by 8.1% a year, and most signals were negative. Inverse-volatility weighting of the whole universe returned 16.3% a year with a Sharpe of 1.21 (survivorship-biased), and buy-and-hold again beat every timing rule. One-month reversal was positive in both periods but significant in neither; it is recorded as a lead for future out-of-sample work, not traded.
+
+**Version 3 configuration** (from the recorded decision):
+
+- hold every eligible stock, weighted by inverse volatility;
+- no alpha tilt;
+- Kelly sizing with an informative prior on the market's return (mean 10% a year from pre-2021 history, standard deviation 3%), quarter Kelly, capped at 100%;
+- the shields kept only as catastrophe limits: CRASH regime to zero exposure, a novel regime x0.5, and the EVT trim.
+
+**Version 3 walk-forward backtest** (same window, same method):
+
+| | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Total return |
+|---|---|---|---|---|---|---|
+| **Titan-Q v3** | 5.9% | 10.7% | 0.59 | 0.81 | 24.0% | 54.3% |
+| Titan-Q v2 baseline | 2.2% | 3.4% | 0.65 | 0.98 | 6.8% | 17.9% |
+| NIFTY 50 buy-and-hold | 10.6% | 17.3% | 0.67 | 0.92 | 38.4% | 114.4% |
+| NIFTY at v3's average exposure (70%) | 7.7% | 12.1% | 0.67 | 0.92 | 28.5% | 74.9% |
+
+Version 3 roughly tripled the baseline's return. It still trails a passive NIFTY position of the same average size, and the gap is one year. In 2020 the catastrophe limits did what they were built to do: they cut exposure after the COVID crash. Exposure then stayed low through the rebound, so the year returned -11.8% against NIFTY's +14.9%. The limits held the maximum drawdown to 24% against 38%, but on this evidence they cost more than they saved. This is the familiar failure of crash rules: they sell after the fall, and the recovery is fast.
 <!-- BACKTEST_RESULTS_END -->
 
 ### 10.6 Integration status, version 2
