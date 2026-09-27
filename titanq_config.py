@@ -20,7 +20,9 @@ from typing import Dict, Tuple
 # Paths
 # ---------------------------------------------------------------------------
 
-PROJECT_DIR = r"D:\Quant_Project"
+# The folder this file lives in (D:\Quant_Project on the trading PC; the repo
+# checkout on a cloud machine). TITANQ_HOME overrides it.
+PROJECT_DIR = os.environ.get("TITANQ_HOME", os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 MODELS_DIR = os.path.join(PROJECT_DIR, "models")
 LOGS_DIR = os.path.join(PROJECT_DIR, "logs")

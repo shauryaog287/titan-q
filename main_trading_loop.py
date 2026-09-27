@@ -41,7 +41,6 @@ import argparse
 import asyncio
 import json
 import logging
-import msvcrt
 import os
 import tempfile
 from datetime import date, datetime, timedelta
@@ -83,7 +82,12 @@ def acquire_live_lock():
     f = open(LOCK_FILE, "a+")
     try:
         f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         f.close()
         return None

@@ -41,6 +41,9 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 - Logs are written to `logs\titanq_YYYY-MM-DD.log`, and each day's decision context to
   `logs\context_YYYY-MM-DD.json`.
 - Git is at `D:\Git\cmd\git.exe`. Commit before and after changes.
+- Cloud research runs (training, backtests while the PC is off) are described in `CLOUD.md`.
+  Paths come from the location of `titanq_config.py` (or `TITANQ_HOME`), so the code also
+  runs on Linux.
 
 ## Architecture (v2)
 

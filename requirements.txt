@@ -1,0 +1,22 @@
+# Pinned from the working venv (D:\trader_env, Python 3.12.10) on 2026-09-27.
+# On Linux, install the CPU build of torch first to avoid the multi-GB CUDA wheel:
+#   pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+numpy==2.2.6
+pandas==3.0.5
+scipy==1.18.1
+scikit-learn==1.9.1
+torch==2.14.0
+stable_baselines3==2.9.0
+gymnasium==1.3.0
+gym-anytrading==2.0.0
+pandas-ta==0.4.71b0
+numba==0.61.2
+yfinance==1.7.0
+curl_cffi==0.16.3
+requests==2.34.2
+pyarrow==25.0.1
+matplotlib==3.11.2
+cloudpickle==3.1.2
+tqdm==4.70.1
+rich==15.0.0

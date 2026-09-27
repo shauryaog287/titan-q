@@ -2,8 +2,9 @@ import os
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+from titanq_config import STATE_FILE
+
 DASHBOARD_HTML = r"C:\Users\jiten\titan-q-dashboard\index.html"
-STATE_FILE = r"D:\Quant_Project\dashboard_state.json"
 
 # Localhost only. Binding 0.0.0.0 exposed the account state to the whole LAN.
 HOST, PORT = "127.0.0.1", 5000
