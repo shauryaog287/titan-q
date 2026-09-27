@@ -16,6 +16,12 @@ DEFAULT_STATE = {
 }
 
 
+class ExclusiveHTTPServer(HTTPServer):
+    # HTTPServer sets SO_REUSEADDR, which on Windows lets a second process bind a
+    # port that is already in use. Turn it off so a second server fails to start.
+    allow_reuse_address = False
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def _send(self, code, content_type, body):
         self.send_response(code)
@@ -50,9 +56,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    try:
+        server = ExclusiveHTTPServer((HOST, PORT), DashboardHandler)
+    except OSError:
+        # The scheduled task starts a server every day; if yesterday's is still
+        # running it already serves the same page and the same state file.
+        print("Dashboard already running at http://localhost:%d -- nothing to do." % PORT)
+        raise SystemExit(0)
     print("==================================================")
     print("TITAN-Q DASHBOARD SERVER RUNNING")
     print("Open your browser to: http://localhost:%d" % PORT)
     print("==================================================")
-    server = HTTPServer((HOST, PORT), DashboardHandler)
     server.serve_forever()
