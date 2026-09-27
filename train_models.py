@@ -101,30 +101,40 @@ def perf(returns: np.ndarray) -> Dict[str, float]:
 # PHASE 11: REGIME HMM
 # ===========================================================================
 
-def train_regime(index_df: pd.DataFrame) -> Dict:
-    from regime_hmm_detector import (FeaturePipeline, MarketRegimeFilter, RegimeModel,
-                                     select_n_states)
+def fit_regime(index_df: pd.DataFrame, select_restarts: int = 8, fit_restarts: int = 12):
+    """Fit the regime model on `index_df` only. Returns (model, pipeline, X, rows,
+    fit result, BIC scores). Used by train_regime and by the walk-forward
+    backtest, which refits it each year on data before that year."""
+    from regime_hmm_detector import FeaturePipeline, RegimeModel, select_n_states
 
     # Features: daily return and log realised variance. NIFTY volume is left
     # out: with it, EM landed in different optima from different starts (a
     # log-likelihood spread of ~1,000 across restarts, measured 2026-09-26)
     # and produced a one-day "regime"; without it every restart agrees.
     prices = index_df["Close"].to_numpy()
-    use_volume = False
     pipe = FeaturePipeline(rv_window=21, volume_window=63)
     F, rows = pipe.build(prices, None)
     F = F[:, :2]                          # the volume column is all zeros without volume
     X = pipe.fit_transform(F)
-    k, scores = select_n_states(X, candidates=(2, 3, 4), n_restarts=8, min_dwell=5.0)
+    k, scores = select_n_states(X, candidates=(2, 3, 4), n_restarts=select_restarts, min_dwell=5.0)
     # refit, and fall back to the next-best admissible K if the refit breaks the
     # dwell guard (a regime shorter than a week is not a regime)
     order = sorted((kk for kk, v in scores.items() if v["admissible"]),
                    key=lambda kk: scores[kk]["bic"]) or [k]
     for k in order:
         model = RegimeModel(n_states=k)
-        fit = model.fit(X, n_restarts=12, pipeline=pipe)
+        fit = model.fit(X, n_restarts=fit_restarts, pipeline=pipe)
         if model.analytics().expected_duration().min() >= 5.0:
             break
+    return model, pipe, X, rows, fit, scores
+
+
+def train_regime(index_df: pd.DataFrame) -> Dict:
+    from regime_hmm_detector import MarketRegimeFilter
+
+    use_volume = False
+    model, pipe, X, rows, fit, scores = fit_regime(index_df)
+    k = model.n_states
 
     filt = MarketRegimeFilter(model)
     for x in X:

@@ -127,7 +127,7 @@ class Orchestrator:
         log.info("[CONTEXT] building for session %s ...", self.feed.session_date)
         self.daily = await asyncio.to_thread(self.store.load, ALL_SYMBOLS, self.mode == "live")
         self.ctx = await asyncio.to_thread(build_daily_context, self.daily, self.feed.session_date,
-                                           self.broker.equity())
+                                           self.broker.equity(), holdings=sorted(self.broker.positions))
         save_context(self.ctx)
         self._seen_notes.clear()
         log.info("[CONTEXT] %s", self.ctx.summary())

@@ -269,8 +269,19 @@ def te_diagnostics(idx_ret: np.ndarray, rets: pd.DataFrame, symbols: Sequence[st
 
 def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: float,
                         cfg: Config = CONFIG, manifest: Optional[Dict] = None,
-                        with_te: bool = True) -> DailyContext:
-    """Everything here uses daily bars dated strictly before `asof`."""
+                        with_te: bool = True, regime_fn=None,
+                        holdings: Optional[Sequence[str]] = None) -> DailyContext:
+    """
+    Everything here uses daily bars dated strictly before `asof`.
+
+    `holdings` are the symbols currently held; if they form a full selection
+    they are kept unless the new best subset is clearly better (see
+    Config.selection_switch_margin).
+
+    `regime_fn(index_df) -> (name, confidence, novel)` replaces the saved
+    regime model; the walk-forward backtest passes one backed by a model
+    trained only on data before each test year.
+    """
     t0 = time.time()
     manifest = load_manifest() if manifest is None else manifest
     idx = daily[INDEX_SYMBOL]
@@ -287,7 +298,8 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
 
     # Phase 11
     try:
-        ctx.regime, ctx.regime_confidence, ctx.regime_novel = regime_state(idx, cfg)
+        ctx.regime, ctx.regime_confidence, ctx.regime_novel = (
+            regime_fn(idx) if regime_fn is not None else regime_state(idx, cfg))
         mult = cfg.regime_multipliers.get(ctx.regime, cfg.regime_multipliers["UNKNOWN"])
         if ctx.regime_novel:
             mult = min(mult, cfg.novel_regime_multiplier)
@@ -344,6 +356,19 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
     # Phase 20 + Phase 12
     sel_idx, ctx.selection_sharpe, ctx.selection_method = select_assets(
         mu.to_numpy(), Sigma_all, cfg.n_select)
+    # incumbent hysteresis: re-optimising from scratch every day flips the
+    # selection on noise; only switch when the new subset is clearly better
+    inc = [s for s in (holdings or []) if s in valid]
+    if len(inc) == cfg.n_select and set(inc) != {valid[i] for i in sel_idx}:
+        from quantum_portfolio_annealer import sharpe as subset_sharpe
+        x = np.zeros(len(valid))
+        inc_idx = np.array(sorted(valid.index(s) for s in inc))
+        x[inc_idx] = 1.0
+        s_inc = subset_sharpe(x, mu.to_numpy(), Sigma_all)
+        if ctx.selection_sharpe <= s_inc + cfg.selection_switch_margin * abs(s_inc):
+            ctx.selection_method += (f"; kept holdings (best {ctx.selection_sharpe:.2f} vs held "
+                                     f"{s_inc:.2f}, margin {100 * cfg.selection_switch_margin:.0f}%)")
+            sel_idx, ctx.selection_sharpe = inc_idx, float(s_inc)
     sel = [valid[i] for i in sel_idx]
     ctx.selection = sel
     from portfolio_hrp_allocator import HRPAllocator

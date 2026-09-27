@@ -77,6 +77,10 @@ class Config:
 
     # ---- selection (Phase 20) and weights (Phase 12) -------------------------
     n_select: int = 4                      # assets held
+    selection_switch_margin: float = 0.20  # keep the current holdings unless the new best
+                                           # subset's expected Sharpe beats theirs by 20%
+                                           # (without this, daily re-optimisation churned
+                                           # ~3000% of equity a year in the backtest)
     cov_lookback_days: int = 252           # covariance estimation window
     momentum_lookback_days: int = 252      # 12-1 momentum: 12 months...
     momentum_skip_days: int = 21           # ...skipping the most recent month
