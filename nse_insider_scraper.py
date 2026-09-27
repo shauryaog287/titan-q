@@ -38,7 +38,7 @@ try:
     
     if response.status_code == 200:
         data = response.json()
-        print("\n🚨 INSIDER ACTIVITY DETECTED TODAY:")
+        print("\n[!] INSIDER ACTIVITY DETECTED TODAY:")
         print("------------------------------------------------")
         
         if 'data' in data and len(data['data']) > 0:

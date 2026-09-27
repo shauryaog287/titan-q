@@ -2,7 +2,7 @@
 graph_alpha_engine_kernels.py
 =============================
 
-Phase 8, Engine I — production implementations of the three compute
+Phase 8, Engine I -- production implementations of the three compute
 bottlenecks. Drop-in replacements for the corresponding skeleton classes.
 
 Fast paths are numba-jitted; every kernel has a vectorised numpy fallback

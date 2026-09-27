@@ -13,18 +13,18 @@ def plot_equity_curve(csv_path: str, output_path: str):
     plt.style.use('ggplot')
     plt.figure(figsize=(12, 6))
     
-    plt.plot(df['Tick'], df['Equity'], color='cyan', linewidth=2, label="Portfolio Equity (₹)")
+    plt.plot(df['Tick'], df['Equity'], color='cyan', linewidth=2, label="Portfolio Equity (Rs.)")
     
     # Fill under the curve
     plt.fill_between(df['Tick'], df['Equity'], df['Equity'].min(), color='cyan', alpha=0.1)
 
     plt.title('Titan-Q AI: Simulated Equity Curve (NIFTY 500 Data Lake)', fontsize=16, pad=15)
     plt.xlabel('Simulated Market Ticks', fontsize=12)
-    plt.ylabel('Virtual Equity (₹)', fontsize=12)
+    plt.ylabel('Virtual Equity (Rs.)', fontsize=12)
     
     # Format Y axis with commas
     current_values = plt.gca().get_yticks()
-    plt.gca().set_yticklabels(['₹{:,.0f}'.format(x) for x in current_values])
+    plt.gca().set_yticklabels(['Rs. {:,.0f}'.format(x) for x in current_values])
     
     plt.legend(loc='upper left', fontsize=12)
     plt.tight_layout()

@@ -83,8 +83,8 @@ def run_human_vs_ai_test():
     human_color = "[green]" if human_pnl > 0 else "[red]"
     ai_color = "[green]" if ai_pnl > 0 else "[red]"
     
-    table.add_row("Retail Trader", "Buy & Hold (NIFTY)", f"₹{human_current_value:,.2f}", f"{human_color}₹{human_pnl:,.2f}[/]")
-    table.add_row("Antigravity AI", "HFT + PPO (77M Steps)", f"₹{ai_capital:,.2f}", f"{ai_color}₹{ai_pnl:,.2f}[/]")
+    table.add_row("Retail Trader", "Buy & Hold (NIFTY)", f"Rs. {human_current_value:,.2f}", f"{human_color}Rs. {human_pnl:,.2f}[/]")
+    table.add_row("Antigravity AI", "HFT + PPO (77M Steps)", f"Rs. {ai_capital:,.2f}", f"{ai_color}Rs. {ai_pnl:,.2f}[/]")
 
     console.print(table)
     console.print("\n[bold yellow]Note:[/] The V1 AI is defensive, but still struggles with raw slippage compared to a perfect market. Phase 16 will fix this!")

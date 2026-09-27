@@ -56,7 +56,7 @@ while True:
     done = terminated or truncated
     if done:
         print("\n=====================================")
-        print("📊 FINAL EXAM RESULTS:")
+        print("FINAL EXAM RESULTS:")
         print("=====================================")
         print(f"Total Profit Ratio: {info['total_profit']:.4f}")
         

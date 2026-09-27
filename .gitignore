@@ -18,3 +18,7 @@ logs/
 
 # Market data cache (re-downloadable; intraday archive grows daily)
 data/
+
+# Paper trading account (live ledger; delete it to reset the account)
+paper_account*.json
+titanq_live.lock

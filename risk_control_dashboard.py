@@ -34,7 +34,7 @@ class RiskControlDashboard:
             logging.info(f"Low Risk Exposure: {(low_risk_exposure/total)*100:.1f}%")
             
             if (high_risk_exposure/total) > 0.4:
-                logging.warning("⚠️ RISK BREACH: High Risk exposure exceeds 40% maximum allowable threshold.")
+                logging.warning("[!] RISK BREACH: High Risk exposure exceeds 40% maximum allowable threshold.")
         return True
 
     def route_to_brain(self, ticker: str) -> str:

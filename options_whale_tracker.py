@@ -42,9 +42,9 @@ def download_options_chain(ticker_symbol):
         logging.info(f"[{ticker_symbol}] Put-Call Ratio (Open Interest): {pcr_oi:.2f}")
         
         if pcr_oi > 1.2:
-            logging.info("🔥 WHALE ALERT: Extreme Put buying detected (Bearish/Hedging)")
+            logging.info("[!] WHALE ALERT: Extreme Put buying detected (Bearish/Hedging)")
         elif pcr_oi < 0.7:
-            logging.info("🚀 WHALE ALERT: Heavy Call buying detected (Bullish Breakout expected)")
+            logging.info("[!] WHALE ALERT: Heavy Call buying detected (Bullish Breakout expected)")
             
         # Save to Data Lake
         os.makedirs("C:/Users/jiten/QuantData/Options", exist_ok=True)

@@ -1,376 +1,324 @@
+"""
+main_trading_loop.py
+====================
+Titan-Q orchestrator: paper trading on NSE large caps.
+
+    D:\\trader_env\\Scripts\\python.exe main_trading_loop.py                 live (default)
+    D:\\trader_env\\Scripts\\python.exe main_trading_loop.py --mode replay   replay a past session
+        --date YYYY-MM-DD   which archived session to replay (default: the latest)
+        --speed N           replay speed in 1-minute bars per second (default 2)
+
+LIVE MODE
+    One process per trading day: the scheduled task starts it at 09:10 IST, it
+    trades 09:15-15:30, and it exits 15 minutes after the close (archiving the
+    day's 1-minute bars). Started on a weekend or after the close, it exits at
+    once. A lock file stops a second live instance from running alongside the
+    first. At start-up it refreshes daily data and builds the daily context
+    (regime, selection, sizing, tail risk) from bars dated BEFORE the session.
+    During the session it polls real 1-minute bars every minute, marks the
+    paper account to market, scores VPIN toxicity, and rebalances toward the
+    target portfolio through the execution engine. The paper account persists
+    in paper_account.json; delete that file to start again from the initial
+    capital.
+
+REPLAY MODE
+    Replays an archived session bar by bar on a throwaway account, with the
+    context built from data before that session. Use it to watch the system
+    trade outside market hours. It never touches the live paper account.
+
+WHAT IS NOT USED, AND WHY
+    The Phase 18 transformer and the Phase 16 spoofing autoencoder need
+    order-book depth, and the Phase 14 Hawkes filter needs trade-by-trade
+    timestamps. The data source (Yahoo Finance) provides neither, so they are
+    reported as unavailable instead of being fed random numbers. The PPO policy
+    and the neural SDE are used only if they beat simple baselines out of
+    sample (train_models.py, models/manifest.json).
+"""
+
+from __future__ import annotations
+
+import argparse
 import asyncio
-import os
-import time
+import json
 import logging
-import random
-import numpy as np
-from datetime import datetime
+import msvcrt
+import os
+import tempfile
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
 
-# Stable Baselines3 (Phase 5)
-from stable_baselines3 import PPO
+from titanq_config import CONFIG, INDEX_SYMBOL, LOGS_DIR, PROJECT_DIR, STATE_FILE, UNIVERSE
+from market_data import ALL_SYMBOLS, IST, DailyStore, LiveBarFeed, ReplayFeed, Session, now_ist
+from titanq_brain import (DailyContext, Rebalancer, ToxicityMonitor, build_daily_context,
+                          save_context)
+from execution_engine import EngineConfig, EngineState, ExecutionEngine, OrderIntent
+from paper_broker import LIVE_ACCOUNT_FILE, PaperTradingBroker
 
-# Infrastructure (Phases 1-4)
-from execution_engine import ExecutionEngine, EngineConfig, OrderIntent
-from paper_broker import PaperTradingBroker
-from fusion_and_sizing import KellySizer, CostModel
+log = logging.getLogger("titanq")
 
-# Advanced Mathematical Engines (Phases 11-15)
-from regime_hmm_detector import MarketRegimeFilter, RegimeModel, Regime
-from hft_hawkes_toxicity import HawkesOnlineFilter, HawkesParams, ToxicityScore
-from pinn_derivative_solver import PINNTrainer, TrainConfig
-from stat_arb_copula import ClaytonCopula, CopulaSignalGenerator
-from portfolio_hrp_allocator import HRPAllocator
-from adversarial_spoof_detector import SpoofDetector, LOBSimConfig, Event
-from rough_volatility_signatures import signature_features, time_augment, add_basepoint, signature, levy_area
-from transformer_lob_forecaster import TemporalFusionLOB
-from quantum_portfolio_annealer import anneal_swap
-from neural_sde_discovery import NeuralSDE
-from transfer_entropy_causality import transfer_entropy, discretize
-import torch
 
-# Log to the console AND to a dated file, so a session can be diagnosed after its
-# window closes. force=True is needed because paper_broker.py (imported above)
-# already called basicConfig, which would otherwise make this call a no-op.
-os.makedirs(r"D:\Quant_Project\logs", exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(datetime.now().strftime(r"D:\Quant_Project\logs\titanq_%Y-%m-%d.log"), encoding="utf-8"),
-    ],
-    force=True,
-)
-
-async def live_trading_orchestrator(engine: ExecutionEngine):
-    """The Ultimate Master Orchestrator tying all 16 Phases into a live pipeline."""
-    logging.info("=========================================")
-    logging.info("INITIALIZING QUANTITATIVE HEDGE FUND V1.1")
-    logging.info("=========================================")
-    
-    # -----------------------------------------------------
-    # 1. LOAD THE CORE AI (PPO Reinforcement Learning)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Loading PPO AI Brain (ppo_sortino_18000000_steps.zip)...")
-    try:
-        # Assuming we use the latest 18M checkpoint
-        ppo_model = PPO.load("checkpoints/ppo_sortino_18000000_steps.zip")
-    except Exception as e:
-        logging.warning(f"[SYSTEM] Could not find 18M checkpoint, using random mock for testing: {e}")
-        ppo_model = None
-
-    # -----------------------------------------------------
-    # 2. CALIBRATE THE MACRO REGIME DETECTOR (Phase 11)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Calibrating Gaussian HMM Regime Filter...")
-    # Mocking calibration: In a live setting, this fits on 10 years of SPY returns
-    class MockRegimeFilter:
-        def update(self, obs): pass
-        @property
-        def state(self): return "BULL"
-        
-    regime_filter = MockRegimeFilter()
-    logging.info("[SYSTEM] HMM Calibrated. Ready to detect Bull/Bear/Crash states.")
-
-    # -----------------------------------------------------
-    # 3. BOOT HFT TOXICITY ENGINE (Phase 14)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Booting Hawkes Process Toxicity Engine...")
-    hawkes_params = HawkesParams(mu=4.0, alpha=8.5, beta=10.0)
-    hft_filter = HawkesOnlineFilter(hawkes_params)
-    toxicity_score = ToxicityScore(combine="geometric", alert_threshold=0.90)
-    toxicity_score.fit_reference(np.random.gamma(4.0, 2.0, 100), np.random.beta(5, 5, 100))
-    logging.info("[SYSTEM] HFT Toxicity Shield armed.")
-
-    # -----------------------------------------------------
-    # 3.5 BOOT ADVERSARIAL LOB SPOOFING SHIELD (Phase 16)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Booting Phase 16 Adversarial Spoofing Autoencoder...")
-    spoof_shield = SpoofDetector(mode="snapshot", code=6, z=4.0)
-    # In live trading, this is pre-fitted on historical LOB data. We load it as armed.
-    logging.info("[SYSTEM] Spoofing Autoencoder Armed. Book-shape anomaly detection ONLINE.")
-
-    # -----------------------------------------------------
-    # 3.6 BOOT TEMPORAL FUSION TRANSFORMER (Phase 18)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Booting Phase 18 Temporal Fusion Transformer Forecaster...")
-    lob_transformer = TemporalFusionLOB(n_levels=10, window=50)
-    lob_transformer.eval()
-    
-    logging.info("[SYSTEM] Booting Phase 21 Neural SDE...")
-    sde_model = NeuralSDE(hidden=32, depth=2)
-    sde_model.eval()
-    logging.info("[SYSTEM] Deep LOB Transformer and Neural SDE Armed.")
-
-    # -----------------------------------------------------
-    # 4. INITIALIZE COPULA STAT-ARB (Phase 13)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Spinning up Archimedean Copula Engine...")
-    clayton = ClaytonCopula(theta=3.86)
-    copula_sig = CopulaSignalGenerator(clayton, threshold=0.05, confirmed=True)
-
-    # -----------------------------------------------------
-    # 5. INITIALIZE HRP PORTFOLIO ALLOCATOR (Phase 12)
-    # -----------------------------------------------------
-    logging.info("[SYSTEM] Initializing Hierarchical Risk Parity Allocator...")
-    hrp = HRPAllocator(method="single", bisection="dendrogram")
-    sizer = KellySizer(kelly_fraction=0.25)
-    
-    logging.info("=========================================")
-    logging.info("       ENTERING LIVE TRADING LOOP        ")
-    logging.info("=========================================")
-    
-    tick_time = 0.0
-    while True:
-        try:
-            now = datetime.now()
-            if now.hour == 22 and now.minute >= 40:
-                logging.warning("INTERNET KILL-SWITCH: HALTING TRADING FOR THE NIGHT.")
-                await asyncio.sleep(600)
-                continue
-                
-            tick_time += 0.1 # advance the simulated clock
-            
-            # =========================================================
-            # STEP A: MICROSTRUCTURE SHIELD (Hawkes Toxicity)
-            # =========================================================
-            # Ingest simulated tick
-            lam = hft_filter.update(tick_time)
-            vpin_dummy = random.uniform(0.3, 0.7)
-            tox = toxicity_score.score(np.array([lam]), np.array([vpin_dummy]))[0]
-            
-            if tox > 0.90:
-                logging.warning(f"[HFT SHIELD] TOXIC FLOW DETECTED (Score={tox:.3f}). HALTING ORDER EXECUTION.")
-                await asyncio.sleep(2)
-                continue
-                
-            # =========================================================
-            # STEP A.2: ADVERSARIAL SPOOFING DETECTOR (Phase 16)
-            # =========================================================
-            # Generate a mock 10-level LOB snapshot to feed the Autoencoder
-            lob_snapshot = {
-                "bid_sz": np.random.lognormal(mean=4.0, sigma=0.5, size=(1, 10)),
-                "ask_sz": np.random.lognormal(mean=4.0, sigma=0.5, size=(1, 10)),
-                "spread": np.array([random.uniform(0.01, 0.05)])
-            }
-            # In a live setting we'd call spoof_shield.detect(lob_snapshot)
-            # For now we simulate an aggressive spoofing detection check (2% chance of firing)
-            is_spoofing = random.random() < 0.02
-            
-            if is_spoofing:
-                logging.error("[SPOOF DETECTOR] MASSIVE LAYERING ATTACK DETECTED IN LIMIT ORDER BOOK! ABORTING TRADE.")
-                await asyncio.sleep(2)
-                continue
-            
-            # =========================================================
-            # STEP B: MACRO REGIME SHIELD (HMM)
-            # =========================================================
-            # Simulate a market return
-            market_ret = random.gauss(0.0001, 0.01)
-            log_vol = random.gauss(-1.0, 0.5)
-            # regime_filter.update(np.array([market_ret, log_vol, 0.0]))
-            
-            # Simulate regime state (80% Bull, 15% Bear, 5% Crash)
-            rand_state = random.random()
-            current_regime = "BULL" if rand_state < 0.8 else "BEAR" if rand_state < 0.95 else "CRASH"
-            
-            if current_regime == "CRASH":
-                logging.error(f"[REGIME SHIELD] CRASH STATE DETECTED. Liquidating non-hedged positions.")
-                await asyncio.sleep(2)
-                continue
-
-            # =========================================================
-            # STEP C.1: ROUGH VOLATILITY FEATURE EXTRACTION (Phase 17)
-            # =========================================================
-            # Generate a 10-step lookback path of (log price, log volume, spread)
-            # In live, this would be actual tick history.
-            path_history = np.cumsum(np.random.randn(10, 3) * 0.01, axis=0) + np.array([100.0, 1000.0, 0.05])
-            
-            # Compute depth-3 time-augmented signature
-            sig_feat = signature_features(path_history[None, :, :], depth=3)
-            # Compute Levy area between price and volume explicitly to see who moved first
-            lob_levy_area = levy_area(signature(path_history[None, :, :2], 2), 0, 1)[0]
-            
-            logging.info(f"[FEATURE ENGINE] Extracted Rough Signature (dim={sig_feat.shape[1]}). Levy Area P/V: {lob_levy_area:+.4f}")
-
-            # =========================================================
-            # STEP C.2: DEEP LOB FORECAST (Phase 18)
-            # =========================================================
-            # Generate a mock 50-tick lookback window for the transformer
-            lob_window = torch.randn(1, 50, 4, 10, dtype=torch.float32)
-            with torch.no_grad():
-                forecast_logits = lob_transformer(lob_window)
-                forecast_probs = torch.softmax(forecast_logits, dim=-1)[0].numpy()
-                
-            logging.info(f"[FORECASTER] Deep LOB Forecast - Down: {forecast_probs[0]:.1%}, Stationary: {forecast_probs[1]:.1%}, Up: {forecast_probs[2]:.1%}")
-
-            # =========================================================
-            # STEP C.2.b: DIRECTED INFORMATION FLOW (Phase 24)
-            # =========================================================
-            # Measure causality from options market to underlying equity
-            # Simulating two related time series for TE computation
-            options_vol = np.random.randn(200)
-            underlying_px = 0.8 * np.roll(options_vol, 1) + np.random.randn(200) * 0.2
-            # Discretize and compute raw plug-in TE
-            te_bits = transfer_entropy(discretize(options_vol, 8), discretize(underlying_px, 8), k=1, l=1, lag=1)
-            logging.info(f"[CAUSALITY ENGINE] Options -> Equity Transfer Entropy: {te_bits:.4f} bits")
-
-            # =========================================================
-            # STEP C.3: ALPHA GENERATION (PPO + Copula)
-            # =========================================================
-            # The AI brain now conceptually ingests `forecast_probs` and `sig_feat`!
-            mock_obs = (np.random.rand(1, 65) * 2 - 1).astype(np.float32)
-            if ppo_model:
-                action, _ = ppo_model.predict(mock_obs, deterministic=True)
-                direction = "BUY" if action[0] == 2 else "SELL" if action[0] == 0 else "HOLD"
-            else:
-                direction = random.choice(["BUY", "BUY", "HOLD", "SELL"])
-
-            if direction != "HOLD":
-                # =========================================================
-                # STEP D.1: QUANTUM PORTFOLIO SELECTION (Phase 20)
-                # =========================================================
-                # Select exactly 4 optimal assets out of 50 via Simulated Annealing
-                N_univ, K_select = 50, 4
-                mock_mu = np.random.normal(0.05, 0.2, N_univ)
-                mock_B = np.random.normal(0, 0.1, (N_univ, 3))
-                mock_Sigma = mock_B @ mock_B.T + np.diag(np.random.uniform(0.01, 0.05, N_univ))
-                
-                best_x, best_sharpe = anneal_swap(mock_mu, mock_Sigma, K_select, n_steps=2000)
-                selected_indices = np.flatnonzero(best_x > 0.5)
-                
-                logging.info(f"[PORTFOLIO] Quantum Annealer selected {K_select} assets from {N_univ} with max-Sharpe: {best_sharpe:.4f}")
-                
-                # =========================================================
-                # =========================================================
-                # STEP D.2: DYNAMIC ALLOCATION (SDE, HRP & Kelly) (Phases 12 & 21)
-                # =========================================================
-                try:
-                    from fusion_and_sizing import CostModel
-                    
-                    # 1. Ask Neural SDE for instantaneous drift (mu) and diffusion (sigma) of the current market state
-                    # (Mocking a normalized market index state)
-                    idx_state = torch.tensor([[0.5]], dtype=torch.float64)
-                    with torch.no_grad():
-                        dyn_mu = sde_model.mu(idx_state).item()
-                        dyn_sigma = sde_model.sigma(idx_state).item()
-                    
-                    # Scale to annual for Kelly Sizer (assuming dt is daily, 252 days)
-                    ann_mu = dyn_mu * 252.0
-                    ann_sigma = dyn_sigma * np.sqrt(252.0)
-
-                    logging.info(f"[SDE DISCOVERY] Neural Drift: {ann_mu:.2%}, Neural Diffusion: {ann_sigma:.2%}")
-
-                    costs = CostModel(impact_coefficient=0.75, half_spread=0.0004)
-                    res = sizer.size(
-                        mu_hat=max(0.01, ann_mu),  # Clamp drift so we still size positively on signal
-                        sigma_annual=max(0.05, ann_sigma),
-                        sample_years=10.0,
-                        equity=500_000.0,
-                        adv_notional=850_000_000.0,
-                        daily_vol=dyn_sigma,
-                        cost_model=costs
-                    )
-                    capital_alloc = res.f_final
-                except Exception as e:
-                    logging.warning(f"[SIZING] Fallback to fixed 0.05 fraction due to {e}")
-                    capital_alloc = 0.05
-                
-                # Subset the covariance matrix for HRP
-                subset_cov = mock_Sigma[np.ix_(selected_indices, selected_indices)]
-                hrp_res = hrp.allocate(subset_cov)
-                weights = hrp_res.weights
-                
-                shares = max(1, int((capital_alloc * 100000) / 3000))
-                
-                logging.info(f"[ALPHA] {direction} SIGNAL. HRP Weights on selected 4: {weights.round(2)}. Executing {shares} shares.")
-                
-                # =========================================================
-                # STEP D.3: EVT TAIL RISK OVERRIDE (Phase 23)
-                # =========================================================
-                # Simulating a dynamic Expected Shortfall (ES) check using Generalized Pareto
-                evt_mock_es = random.uniform(0.01, 0.15)
-                if evt_mock_es > 0.12: # If short-term tail risk is > 12% loss potential
-                    logging.warning(f"[EVT RISK] Fat-Tail Risk elevated (ES={evt_mock_es:.1%}). Trimming order size by 50%.")
-                    shares = max(1, shares // 2)
-
-                # =========================================================
-                # STEP E: HJB OPTIMAL EXECUTION (Phase 22) & QUANTUM ROUTING
-                # =========================================================
-                NIFTY_50 = [
-                    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", 
-                    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "BAJFINANCE.NS",
-                    "KOTAKBANK.NS", "LT.NS", "ASIANPAINT.NS", "AXISBANK.NS", "HCLTECH.NS", 
-                    "MARUTI.NS", "BAJAJFINSV.NS", "TITAN.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS",
-                    "TATASTEEL.NS", "WIPRO.NS", "NESTLEIND.NS", "TECHM.NS", "ONGC.NS", 
-                    "POWERGRID.NS", "HINDALCO.NS", "M&M.NS", "NTPC.NS", "INDUSINDBK.NS",
-                    "GRASIM.NS", "DIVISLAB.NS", "TMPV.NS", "BAJAJ-AUTO.NS", "JSWSTEEL.NS", 
-                    "BRITANNIA.NS", "ADANIPORTS.NS", "CIPLA.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS",
-                    "COALINDIA.NS", "TATACONSUM.NS", "APOLLOHOSP.NS", "UPL.NS", "DRREDDY.NS", 
-                    "EICHERMOT.NS", "BPCL.NS", "SBILIFE.NS", "SHREECEM.NS", "TATAPOWER.NS"
-                ]
-
-                # Loop through the 4 optimal assets selected by the Phase 20 Quantum Annealer
-                for idx, weight in zip(selected_indices, weights):
-                    # Ensure index is within bounds
-                    safe_idx = int(idx) % len(NIFTY_50)
-                    ticker = NIFTY_50[safe_idx]
-                    
-                    # Allocate shares based on HRP weight (Phase 12)
-                    allocated_shares = max(1, int(shares * weight))
-                    
-                    logging.info(f"[EXECUTION] Routing {direction} {allocated_shares} shares of {ticker} (HRP Weight: {weight:.2%})")
-                    intent = OrderIntent(symbol=ticker, side=direction, quantity=allocated_shares)
-                    engine.intents.put(intent)
-                    
-            else:
-                logging.info(f"[ALPHA] PPO Model output: HOLD. Waiting for setup.")
-                
-            # =========================================================
-            # EXPORT LIVE STATE TO DASHBOARD
-            # =========================================================
-            try:
-                import json
-                
-                # Format quantum assets for dashboard
-                q_assets = []
-                for idx, weight in zip(selected_indices, weights):
-                    safe_idx = int(idx) % len(NIFTY_50)
-                    q_assets.append({
-                        "ticker": NIFTY_50[safe_idx],
-                        "w": float(weight)
-                    })
-                    
-                dashboard_data = {
-                    "current_pnl": float(engine.broker.capital),
-                    "toxicity_score": float(np.mean(tox_values)) if 'tox_values' in locals() and len(tox_values) > 0 else 0.0,
-                    "quantum_assets": q_assets,
-                    "recent_trades": [] # The broker trade history parsing could go here, omitting for simplicity
-                }
-                with open(r"D:\Quant_Project\dashboard_state.json", "w") as f:
-                    json.dump(dashboard_data, f)
-            except Exception as ex:
-                pass # Fail silently if JSON dump fails
-                
-        except Exception as e:
-            logging.exception("Trading loop error:")
-            
-        logging.info("--- Cycle complete. Waiting for next tick ---")
-        await asyncio.sleep(5)
-
-async def main():
-    broker = PaperTradingBroker(initial_capital=500000.0)
-    config = EngineConfig(algo_id="TITAN-Q-FUND", warmup_bars_required=0)
-    engine = ExecutionEngine(broker=broker, config=config)
-    broker.fill_callback = engine.on_fill
-
-    await asyncio.gather(
-        engine.run(),
-        live_trading_orchestrator(engine)
+def setup_logging(mode: str) -> str:
+    """Console and a dated file, so a session can be diagnosed after its window closes."""
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    suffix = "_replay" if mode == "replay" else ""
+    path = os.path.join(LOGS_DIR, datetime.now().strftime(f"titanq_%Y-%m-%d{suffix}.log"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(), logging.FileHandler(path, encoding="utf-8")],
+        force=True,
     )
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)   # it logs every missing ticker
+    return path
+
+
+LOCK_FILE = os.path.join(PROJECT_DIR, "titanq_live.lock")
+SHUTDOWN_AFTER_CLOSE = timedelta(minutes=15)
+
+
+def acquire_live_lock():
+    """Exclusive OS-level lock; released automatically when the process exits.
+    Returns the open file (keep a reference) or None if another live instance
+    holds it."""
+    f = open(LOCK_FILE, "a+")
+    try:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        f.close()
+        return None
+    f.seek(0)
+    f.truncate()
+    f.write(f"pid {os.getpid()} started {datetime.now(IST).isoformat(timespec='seconds')}\n")
+    f.flush()
+    return f
+
+
+def write_json_atomic(path: str, obj: Dict) -> None:
+    """Write-then-rename, so the dashboard never reads a half-written file."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="ascii") as f:
+        json.dump(obj, f, default=float)
+    os.replace(tmp, path)
+
+
+class Orchestrator:
+    def __init__(self, mode: str, feed, broker: PaperTradingBroker, engine: ExecutionEngine,
+                 store: DailyStore, session: Session) -> None:
+        self.mode = mode
+        self.feed = feed
+        self.broker = broker
+        self.engine = engine
+        self.store = store
+        self.session = session
+        self.ctx: Optional[DailyContext] = None
+        self.daily: Dict = {}
+        self.rebalancer = Rebalancer(CONFIG, session)
+        self.tox = ToxicityMonitor(CONFIG)
+        self.toxicity: Dict[str, Optional[float]] = {}
+        self.vpin: Dict[str, Optional[float]] = {}
+        self.status = ""
+        self.notes: List[str] = []
+        self._seen_notes: set = set()
+
+    # ---- daily context ------------------------------------------------------
+
+    async def build_context(self) -> None:
+        log.info("[CONTEXT] building for session %s ...", self.feed.session_date)
+        self.daily = await asyncio.to_thread(self.store.load, ALL_SYMBOLS, self.mode == "live")
+        self.ctx = await asyncio.to_thread(build_daily_context, self.daily, self.feed.session_date,
+                                           self.broker.equity())
+        save_context(self.ctx)
+        self._seen_notes.clear()
+        log.info("[CONTEXT] %s", self.ctx.summary())
+        for name, st in self.ctx.components.items():
+            log.info("[COMPONENT] %-20s %s", name, st)
+        for r in self.ctx.reasons:
+            log.warning("[CONTEXT] %s", r)
+
+    def _adv(self, symbol: str) -> Optional[float]:
+        if self.ctx and symbol in self.ctx.adv_shares:
+            return self.ctx.adv_shares[symbol]
+        df = self.daily.get(symbol)
+        if df is None or not len(df):
+            return None
+        return float(df[df.index < str(self.feed.session_date)]["Volume"].iloc[-20:].median())
+
+    # ---- per cycle ------------------------------------------------------------
+
+    def _symbols(self) -> List[str]:
+        return sorted(set(self.ctx.target_weights if self.ctx else {}) | set(self.broker.positions))
+
+    def update_toxicity(self) -> None:
+        for s in self._symbols():
+            self.toxicity[s], self.vpin[s] = self.tox.score(
+                s, self.feed.bars(s), self._adv(s), self.feed.session_date)
+
+    def set_status(self, status: str) -> None:
+        if status != self.status:
+            log.info("[STATUS] %s", status)
+            self.status = status
+
+    def step(self, now: datetime) -> None:
+        if not self.session.is_open(now):
+            self.set_status("market closed; next open %s" %
+                            self.session.next_open(now).strftime("%a %d %b %H:%M IST"))
+            return
+        if self.feed.is_stale():
+            self.set_status("waiting: no new 1-minute bar (feed stale or exchange holiday)")
+            return
+        if self.engine.state is not EngineState.LIVE:
+            self.set_status(f"waiting: execution engine is {self.engine.state.name}")
+            return
+        if not self.ctx.tradeable:
+            self.set_status("NOT TRADING: " + "; ".join(self.ctx.reasons))
+            return
+        if len(self.engine.intents):
+            return                                  # let queued orders execute first
+        self.set_status("trading")
+
+        positions = dict(self.broker.positions)
+        prices = {s: self.feed.last_price(s) for s in self._symbols()}
+        orders, notes = self.rebalancer.plan(
+            self.ctx.target_weights, positions, prices, self.broker.capital,
+            self.broker.equity(), now, self.toxicity)
+        for n in notes:
+            if n not in self._seen_notes:
+                self._seen_notes.add(n)
+                log.info("[REBALANCE] %s", n)
+        self.notes = (notes + self.notes)[:10]
+        for o in orders:
+            log.info("[REBALANCE] %s %d %s @ ~Rs. %.2f (%s)", o.side, o.qty, o.symbol, o.price, o.reason)
+            self.engine.intents.put(OrderIntent(symbol=o.symbol, side=o.side, quantity=o.qty,
+                                                order_type="MARKET", reduce_only=o.reduce_only,
+                                                decision_price=o.price))
+
+    def export(self, now: datetime) -> None:
+        snap = self.broker.snapshot()
+        ctx = self.ctx
+        tox_vals = [v for v in self.toxicity.values() if v is not None]
+        state = {
+            # the contract index.html reads
+            "current_pnl": snap["pnl"],
+            "toxicity_score": max(tox_vals) if tox_vals else 0.0,
+            "quantum_assets": [{"ticker": s, "w": w} for s, w in (ctx.hrp_weights.items() if ctx else [])],
+            "recent_trades": [{"id": t["id"], "side": t["side"], "ticker": t["ticker"],
+                               "price": t["price"], "qty": t["qty"], "ts": t["ts"]}
+                              for t in self.broker.recent_trades()],
+            # extra detail for anyone reading the JSON
+            "mode": self.mode, "status": self.status,
+            "market_time": now.isoformat(timespec="seconds"),
+            "session_open": self.session.is_open(now),
+            "engine_state": self.engine.state.name,
+            "equity": snap["equity"], "cash": snap["cash"],
+            "initial_capital": self.broker.initial_capital,
+            "realised_pnl": snap["realised_pnl"], "fees_paid": snap["fees_paid"],
+            "positions": snap["positions"],
+            "exposure_target": ctx.exposure if ctx else None,
+            "regime": ctx.regime if ctx else None,
+            "target_weights": ctx.target_weights if ctx else {},
+            "toxicity_by_symbol": self.toxicity, "vpin_by_symbol": self.vpin,
+            "components": ctx.components if ctx else {},
+            "notes": self.notes,
+        }
+        try:
+            write_json_atomic(STATE_FILE, state)
+        except Exception as exc:
+            log.warning("dashboard export failed: %s", exc)
+
+    async def run(self) -> None:
+        await self.build_context()
+        self.update_toxicity()
+        while True:
+            try:
+                new_bar = await self.feed.poll()
+                now = self.feed.now()
+                if (self.mode == "live" and self.session.is_open(now)
+                        and self.ctx.asof != str(now.date())):
+                    await self.build_context()      # a new session began while running
+                if new_bar:
+                    self.update_toxicity()
+                self.step(now)
+                self.export(now)
+                if self.mode == "replay" and self.feed.finished and not len(self.engine.intents):
+                    await asyncio.sleep(1.0)        # let the last fills land
+                    self.finish(f"REPLAY OF {self.feed.session_date} COMPLETE")
+                    self.engine._running = False     # stops engine.run(), which then logs out
+                    return
+                if self.mode == "live" and now >= (self.session.bounds(now.date())[1]
+                                                   + SHUTDOWN_AFTER_CLOSE):
+                    await asyncio.to_thread(self.feed.store.archive, self.feed._bars)
+                    self.finish(f"SESSION {now.date()} CLOSED")
+                    self.engine._running = False
+                    return
+            except Exception:
+                log.exception("orchestrator cycle error")
+            await asyncio.sleep(CONFIG.cycle_seconds if self.mode == "live" else 0.25)
+
+    def finish(self, title: str) -> None:
+        snap = self.broker.snapshot()
+        log.info("=" * 60)
+        log.info(title)
+        log.info(" trades: %d | fees: Rs. %s | equity: Rs. %s | PnL: Rs. %s",
+                 len(self.broker.trade_history), f"{snap['fees_paid']:,.2f}",
+                 f"{snap['equity']:,.2f}", f"{snap['pnl']:,.2f}")
+        for p in snap["positions"]:
+            log.info(" holding %-14s %5d @ avg Rs. %.2f, last Rs. %s", p["ticker"], p["qty"],
+                     p["avg_cost"], p["price"])
+        log.info("=" * 60)
+
+
+async def main(args) -> None:
+    session = Session()
+    lock = None
+    if args.mode == "live":
+        now = now_ist()
+        close = session.bounds(now.date())[1]
+        if now.weekday() >= 5 or now >= close + SHUTDOWN_AFTER_CLOSE:
+            log.info("Market closed for today (%s). Next session opens %s.",
+                     now.strftime("%a %d %b %H:%M IST"),
+                     session.next_open(now).strftime("%a %d %b %H:%M IST"))
+            log.info("Archiving recent 1-minute bars, then exiting. To watch the system trade "
+                     "now, run: main_trading_loop.py --mode replay")
+            await LiveBarFeed(session=session).start()
+            return
+        lock = acquire_live_lock()
+        if lock is None:
+            log.error("Another live Titan-Q instance is already running (lock %s). Exiting.", LOCK_FILE)
+            return
+    if args.mode == "replay":
+        feed = ReplayFeed(session_date=date.fromisoformat(args.date) if args.date else None,
+                          bars_per_second=args.speed)
+        state_file = None                     # throwaway account
+    else:
+        feed = LiveBarFeed(session=session)
+        state_file = LIVE_ACCOUNT_FILE
+    broker = PaperTradingBroker(CONFIG.initial_capital, price_fn=feed.last_price,
+                                clock_fn=feed.now, state_file=state_file)
+    log.info("=" * 60)
+    log.info("TITAN-Q  mode=%s  session=%s  account=%s", args.mode, feed.session_date,
+             state_file or "in-memory")
+    log.info("=" * 60)
+    await feed.start()
+
+    engine = ExecutionEngine(broker=broker,
+                             config=EngineConfig(algo_id="TITAN-Q-PAPER", warmup_bars_required=0))
+    broker.fill_callback = engine.on_fill
+    engine.local_positions.update(broker.positions)   # a restarted account is not a discrepancy
+    orch = Orchestrator(args.mode, feed, broker, engine, DailyStore(), session)
+    await asyncio.gather(engine.run(), orch.run())
+
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Titan-Q paper trading orchestrator")
+    ap.add_argument("--mode", choices=("live", "replay"), default="live")
+    ap.add_argument("--date", default=None, help="replay: session date YYYY-MM-DD")
+    ap.add_argument("--speed", type=float, default=CONFIG.replay_bars_per_second,
+                    help="replay: 1-minute bars per second")
+    args = ap.parse_args()
+    log_path = setup_logging(args.mode)
+    log.info("logging to %s", log_path)
     try:
-        asyncio.run(main())
+        asyncio.run(main(args))
     except KeyboardInterrupt:
         print("Shutting down...")
