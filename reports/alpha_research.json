@@ -1,0 +1,318 @@
+{
+  "development": [
+    {
+      "signal": "MOM_12_1",
+      "months": 63,
+      "mean_ic": 0.018082329182939644,
+      "ic_t": 0.5172895100718049,
+      "ic_hit": 0.4444444444444444,
+      "top4_excess_ann": -0.03725202785228009,
+      "top4_excess_t": -0.5323134994973303,
+      "top4_sharpe": 0.5959090661527362,
+      "top8_excess_ann": -0.00506770727055362,
+      "top8_excess_t": -0.1179367973747401,
+      "top8_sharpe": 0.8672533658829407
+    },
+    {
+      "signal": "MOM_6_1",
+      "months": 63,
+      "mean_ic": 0.016321931001377247,
+      "ic_t": 0.5459157755882446,
+      "ic_hit": 0.5396825396825397,
+      "top4_excess_ann": 0.03279459716934667,
+      "top4_excess_t": 0.4768024610337964,
+      "top4_sharpe": 0.7558572729845806,
+      "top8_excess_ann": 0.02336751006406734,
+      "top8_excess_t": 0.4519487469801037,
+      "top8_sharpe": 0.8266199232519331
+    },
+    {
+      "signal": "REV_1M",
+      "months": 63,
+      "mean_ic": 0.03041326358304214,
+      "ic_t": 1.3305816475329821,
+      "ic_hit": 0.5873015873015873,
+      "top4_excess_ann": 0.017878075089638422,
+      "top4_excess_t": 0.23915712031077777,
+      "top4_sharpe": 0.7370995949788572,
+      "top8_excess_ann": 0.004857504996824584,
+      "top8_excess_t": 0.10934624184399,
+      "top8_sharpe": 0.8076184255938927
+    },
+    {
+      "signal": "LOWVOL",
+      "months": 63,
+      "mean_ic": -0.03277307072778453,
+      "ic_t": -1.120541527130088,
+      "ic_hit": 0.5079365079365079,
+      "top4_excess_ann": 0.015593272696729735,
+      "top4_excess_t": 0.25686931700246557,
+      "top4_sharpe": 1.122323392454169,
+      "top8_excess_ann": -0.04468147494676375,
+      "top8_excess_t": -0.9996918835956353,
+      "top8_sharpe": 0.866682309669183
+    },
+    {
+      "signal": "LOWBETA",
+      "months": 6,
+      "mean_ic": -0.030966216273743536,
+      "ic_t": -0.27679214027103755,
+      "ic_hit": 0.5,
+      "top4_excess_ann": 0.03718892237431146,
+      "top4_excess_t": 0.5935687416186948,
+      "top4_sharpe": 1.1598477621754273,
+      "top8_excess_ann": 0.0018087925890407865,
+      "top8_excess_t": 0.04463754814489031,
+      "top8_sharpe": 1.1026496043680134
+    },
+    {
+      "signal": "HI52",
+      "months": 63,
+      "mean_ic": 0.003964443523956343,
+      "ic_t": 0.12550178534112555,
+      "ic_hit": 0.5238095238095238,
+      "top4_excess_ann": -0.09480713491509152,
+      "top4_excess_t": -1.4425628962207426,
+      "top4_sharpe": 0.5129181717099269,
+      "top8_excess_ann": -0.06357729982117483,
+      "top8_excess_t": -1.3191337856335545,
+      "top8_sharpe": 0.6880771760732594
+    },
+    {
+      "signal": "TREND200",
+      "months": 63,
+      "mean_ic": 0.023548521738989418,
+      "ic_t": 0.7511692595561598,
+      "ic_hit": 0.5714285714285714,
+      "top4_excess_ann": -0.02819507970239118,
+      "top4_excess_t": -0.4351968435471182,
+      "top4_sharpe": 0.7262166091759987,
+      "top8_excess_ann": 0.0184343860816576,
+      "top8_excess_t": 0.39858880883833137,
+      "top8_sharpe": 1.099395850668082
+    },
+    {
+      "signal": "EW universe",
+      "months": 63,
+      "ew_ann_return": 0.18599257916412518,
+      "ew_sharpe": 0.9563818237256801
+    }
+  ],
+  "test": [
+    {
+      "signal": "MOM_12_1",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "MOM_6_1",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "REV_1M",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "LOWVOL",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "LOWBETA",
+      "months": 50,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "HI52",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "TREND200",
+      "months": 67,
+      "mean_ic": NaN,
+      "ic_t": NaN,
+      "ic_hit": NaN,
+      "top4_excess_ann": NaN,
+      "top4_excess_t": NaN,
+      "top4_sharpe": NaN,
+      "top8_excess_ann": NaN,
+      "top8_excess_t": NaN,
+      "top8_sharpe": NaN
+    },
+    {
+      "signal": "EW universe",
+      "months": 67,
+      "ew_ann_return": NaN,
+      "ew_sharpe": NaN
+    }
+  ],
+  "overlays": {
+    "buy_and_hold": {
+      "development": {
+        "cagr": 0.11433408390180588,
+        "vol": 0.18015698842469072,
+        "sharpe": 0.6920464759802377,
+        "max_dd": 0.38439852452742107,
+        "avg_exposure": 1.0
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    },
+    "trend_200d": {
+      "development": {
+        "cagr": 0.057998921608731546,
+        "vol": 0.09999586945879411,
+        "sharpe": 0.6138852883084911,
+        "max_dd": 0.18329477026857477,
+        "avg_exposure": 0.6926605504587156
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    },
+    "vol_target_15": {
+      "development": {
+        "cagr": 0.07635053284212212,
+        "vol": 0.13743319545881943,
+        "sharpe": 0.604420381863277,
+        "max_dd": 0.287809189350839,
+        "avg_exposure": 0.9147129862391444
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    },
+    "trend_x_vol_target": {
+      "development": {
+        "cagr": 0.05044320867549601,
+        "vol": 0.09672624361018353,
+        "sharpe": 0.5572098456390276,
+        "max_dd": 0.18283038648387384,
+        "avg_exposure": 0.6720499493035422
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    }
+  },
+  "construction": {
+    "equal_weight": {
+      "development": {
+        "cagr": 0.17934520201314186,
+        "vol": 0.1945157328433274,
+        "sharpe": 0.9544832767515488,
+        "max_dd": 0.31110355320053196,
+        "avg_exposure": 1.0
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    },
+    "inverse_vol": {
+      "development": {
+        "cagr": 0.17276981911192557,
+        "vol": 0.1861938617843482,
+        "sharpe": 0.9574165144850462,
+        "max_dd": 0.2921850455944126,
+        "avg_exposure": 1.0
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    },
+    "hrp": {
+      "development": {
+        "cagr": 0.13413538263728997,
+        "vol": 0.18333458530446287,
+        "sharpe": 0.7784961596161982,
+        "max_dd": 0.22167590563238082,
+        "avg_exposure": 1.0
+      },
+      "test": {
+        "cagr": NaN,
+        "vol": NaN,
+        "sharpe": NaN,
+        "max_dd": NaN,
+        "avg_exposure": NaN
+      }
+    }
+  },
+  "test_revealed": false,
+  "cost_per_unit_traded": 0.0016056999999999998
+}
