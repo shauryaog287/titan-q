@@ -170,20 +170,27 @@ class DailyStore:
         return (not os.path.exists(p)) or (time.time() - os.path.getmtime(p) > 3600 * max_age_hours)
 
     def load(self, symbols: Iterable[str] = ALL_SYMBOLS, refresh: bool = True,
-             max_age_hours: float = 12.0) -> Dict[str, pd.DataFrame]:
+             max_age_hours: float = 12.0, batch: int = 150) -> Dict[str, pd.DataFrame]:
         symbols = list(symbols)
         stale = [s for s in symbols if refresh and self._is_stale(s, max_age_hours)]
-        if stale:
+        got = 0
+        for i in range(0, len(stale), batch):        # batches keep Yahoo's rate limit happy
+            chunk = stale[i:i + batch]
             try:
-                fresh = yf_download(stale, period=f"{self.years}y", interval="1d", auto_adjust=True)
+                fresh = yf_download(chunk, period=f"{self.years}y", interval="1d", auto_adjust=True)
                 for s, df in fresh.items():
                     df = df.copy()
                     df.index = pd.DatetimeIndex(df.index).tz_localize(None).normalize()
                     df = df[~df.index.duplicated(keep="last")].sort_index()
                     df.to_parquet(self.path(s))
-                log.info("daily data refreshed for %d/%d symbols", len(fresh), len(stale))
+                got += len(fresh)
             except Exception as exc:
-                log.warning("daily refresh failed (%s); using cached files", exc)
+                log.warning("daily refresh failed for a batch of %d (%s); using cached files",
+                            len(chunk), exc)
+            if len(stale) > batch:
+                time.sleep(1.0)
+        if stale:
+            log.info("daily data refreshed for %d/%d symbols", got, len(stale))
         out: Dict[str, pd.DataFrame] = {}
         for s in symbols:
             p = self.path(s)
