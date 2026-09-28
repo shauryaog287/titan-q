@@ -1,0 +1,2 @@
+# Shell scripts run under bash (cloud sessions, Git Bash): keep LF even on Windows
+*.sh text eol=lf

@@ -12,6 +12,10 @@ equity_curve_results.csv
 
 # Local tool config (personal settings, not project code)
 .claude.json
+.claude/settings.local.json
+
+# Python virtual environment (cloud sessions, built by .claude/hooks/session-start.sh)
+.venv/
 
 # Run logs
 logs/
