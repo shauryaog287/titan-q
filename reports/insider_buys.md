@@ -20,3 +20,19 @@ Rule: mean net excess >= +1.0%, month-clustered t >= 2.0, >= 100 events.
 
 **Decision: qualifies; reveal the test once.**
 
+## Test (entries 2021-01 onward, revealed once)
+
+Disclosures that could not be mapped to a current ticker: 2,382.
+
+| Events | N | Mean net excess | Median | Month-clustered t | Hit rate |
+|---|---|---|---|---|---|
+| **Primary: insider buys, 60 days** | 1,147 | -1.42% | -3.04% | -1.66 | 41.2% |
+| insider buys, 20 days | 1,147 | +0.04% | -0.21% | -0.26 | 48.9% |
+| insider buys, 120 days | 1,146 | -1.53% | -5.10% | -1.23 | 41.4% |
+| promoters / promoter group only | 1,042 | -1.47% | -2.85% | -1.74 | 41.3% |
+| directors / key managers only | 110 | -0.26% | -3.72% | +0.11 | 41.8% |
+| buys of Rs. 1 crore or more | 760 | -0.74% | -2.57% | -0.83 | 41.3% |
+| insider SALES (negative = signal) | 1,990 | -1.09% | -2.34% | -1.55 | 44.3% |
+
+**Test: failed.**
+

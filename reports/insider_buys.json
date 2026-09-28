@@ -65,5 +65,71 @@
     }
   },
   "qualifies": true,
-  "test_revealed": false
+  "test_revealed": true,
+  "test": {
+    "primary": {
+      "events": 1147,
+      "stocks": 185,
+      "months": 65,
+      "mean_excess": -0.014209259827918402,
+      "median_excess": -0.030375795170567235,
+      "month_t": -1.6575129179821135,
+      "hit_rate": 0.41238012205754143
+    },
+    "insider buys, 20 days": {
+      "events": 1147,
+      "stocks": 185,
+      "months": 65,
+      "mean_excess": 0.000418813968113601,
+      "median_excess": -0.0021402720115897096,
+      "month_t": -0.2644469326574557,
+      "hit_rate": 0.4891020052310375
+    },
+    "insider buys, 120 days": {
+      "events": 1146,
+      "stocks": 185,
+      "months": 64,
+      "mean_excess": -0.015342225702297953,
+      "median_excess": -0.05100767412269058,
+      "month_t": -1.2325394355563903,
+      "hit_rate": 0.4144851657940663
+    },
+    "promoters / promoter group only": {
+      "events": 1042,
+      "stocks": 159,
+      "months": 65,
+      "mean_excess": -0.014714407278812501,
+      "median_excess": -0.028492739083719642,
+      "month_t": -1.741702731428493,
+      "hit_rate": 0.4126679462571977
+    },
+    "directors / key managers only": {
+      "events": 110,
+      "stocks": 49,
+      "months": 37,
+      "mean_excess": -0.0026129313469752144,
+      "median_excess": -0.037183615491195754,
+      "month_t": 0.11115286370537635,
+      "hit_rate": 0.41818181818181815
+    },
+    "buys of Rs. 1 crore or more": {
+      "events": 760,
+      "stocks": 135,
+      "months": 65,
+      "mean_excess": -0.007420868213841033,
+      "median_excess": -0.025732107987180487,
+      "month_t": -0.8309250689651339,
+      "hit_rate": 0.4131578947368421
+    },
+    "insider SALES (negative = signal)": {
+      "events": 1990,
+      "stocks": 286,
+      "months": 65,
+      "mean_excess": -0.010859561594953309,
+      "median_excess": -0.02342828463786301,
+      "month_t": -1.5456127562437352,
+      "hit_rate": 0.44271356783919597
+    }
+  },
+  "test_passed": false
 }
