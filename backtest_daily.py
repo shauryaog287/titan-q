@@ -142,14 +142,18 @@ VARIANTS = {
     "market": {"regime_multipliers": {k: 1.0 for k in
                                       ("BULL", "SIDEWAYS", "HIGH_VOL", "BEAR", "CRASH", "UNKNOWN")},
                "novel_regime_multiplier": 1.0, "es_trim": 1.0, "kelly_fraction": 1.0},
+    # sizing volatility: EWMA of the basket's daily returns instead of the 252-day
+    # window (reports/preregistration_sizing_vol.md; chosen on 2016-2020 only)
+    "ewma_vol_21": {"sizing_vol_halflife_days": 21},
+    "ewma_vol_63": {"sizing_vol_halflife_days": 63},
 }
 
 
 def run(start: date, end: date, capital: float = CONFIG.initial_capital,
-        variant: str = "live") -> Dict:
+        variant: str = "live", tag: str = "") -> Dict:
     import dataclasses
     cfg = dataclasses.replace(CONFIG, **VARIANTS[variant])
-    tag = "" if variant == "live" else f"_{variant}"
+    tag = tag or ("" if variant == "live" else f"_{variant}")
     t_start = _time.time()
     daily = DailyStore().load(ALL_SYMBOLS, refresh=False)
     idx = daily[INDEX_SYMBOL]
@@ -238,7 +242,7 @@ def run(start: date, end: date, capital: float = CONFIG.initial_capital,
             "selection_mode", "weighting", "n_select", "kelly_fraction", "kelly_prior_edge_vol",
             "prior_market_return", "alpha_ic", "cov_lookback_days", "rebalance_band",
             "min_trade_value", "es_relative_threshold", "es_trim", "regime_multipliers",
-            "novel_regime_multiplier")},
+            "novel_regime_multiplier", "sizing_vol_halflife_days")},
         "biases": ["survivorship (today's universe applied to the past)",
                    "NIFTY is a price index; stocks include dividends",
                    "cash earns 0%", "no VPIN toxicity (no historical 1-minute data)"],
@@ -319,11 +323,14 @@ if __name__ == "__main__":
     ap.add_argument("--start", default="2019-01-01")
     ap.add_argument("--end", default=None)
     ap.add_argument("--variant", choices=sorted(VARIANTS), default="live",
-                    help="live = the configuration the live system runs; market = no timing overlays")
+                    help="live = the configuration the live system runs; market = no timing overlays; "
+                         "ewma_vol_* = EWMA sizing volatility (see reports/preregistration_sizing_vol.md)")
+    ap.add_argument("--tag", default="",
+                    help="suffix for the output files (default: _<variant>, or none for live)")
     a = ap.parse_args()
+    tag = a.tag or ("" if a.variant == "live" else f"_{a.variant}")
     rep = run(date.fromisoformat(a.start), date.fromisoformat(a.end) if a.end else date.today(),
-              variant=a.variant)
-    tag = "" if a.variant == "live" else f"_{a.variant}"
+              variant=a.variant, tag=tag)
     with open(os.path.join(REPORT_DIR, f"backtest_daily_report{tag}.md"), encoding="ascii") as f:
         print(f.read())
     print(f"completed in {rep['seconds']:.0f}s")

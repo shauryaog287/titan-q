@@ -94,6 +94,7 @@ class DailyContext:
     basket_beta: float = 1.0
     basket_mu: float = 0.0
     basket_sigma: float = 0.0
+    sizing_sigma: float = 0.0              # the volatility Kelly divides by
     alpha_z: Dict[str, float] = field(default_factory=dict)
 
     kelly_f: float = 0.0
@@ -397,6 +398,15 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
     mu_sel = mu[sel].to_numpy()
     ctx.basket_mu = float(w @ mu_sel)
     ctx.basket_sigma = float(math.sqrt(w @ S_sel @ w))
+    ctx.sizing_sigma = ctx.basket_sigma
+    if cfg.sizing_vol_halflife_days > 0:
+        # EWMA (zero-mean) variance of today's basket over its past daily returns;
+        # it forgets a volatility shock faster than the fixed covariance window
+        h = cfg.sizing_vol_halflife_days
+        br = pd.Series(logret[sel].iloc[-10 * h:].fillna(0.0).to_numpy() @ w)
+        ewvar = float((br ** 2).ewm(halflife=h).mean().iloc[-1])
+        if np.isfinite(ewvar) and ewvar > 0:
+            ctx.sizing_sigma = math.sqrt(ewvar * TRADING_DAYS)
 
     # liquidity for sizing and for VPIN bucket sizes
     for s in sel:
@@ -415,7 +425,7 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
     costs = CostModel(impact_coefficient=0.75, half_spread=cfg.slippage_bps / 1e4,
                       fees_bps=1e4 * (cfg.exchange_rate + cfg.sebi_rate + cfg.stamp_rate_buy / 2),
                       stt_bps=1e4 * cfg.stt_rate)
-    kr = sizer.size(mu_hat=ctx.basket_mu, sigma_annual=max(ctx.basket_sigma, 1e-4),
+    kr = sizer.size(mu_hat=ctx.basket_mu, sigma_annual=max(ctx.sizing_sigma, 1e-4),
                     sample_years=ctx.market_span_years, equity=equity, adv_notional=adv_notional,
                     daily_vol=ctx.basket_sigma / math.sqrt(TRADING_DAYS), cost_model=costs)
     ctx.kelly_f, ctx.kelly_binding = kr.f_final, kr.binding_constraint
@@ -664,6 +674,50 @@ def _test_toxicity_detects_one_sided_flow() -> None:
           f"sessions), before it {quiet if quiet is None else round(quiet, 2)}")
 
 
+def _test_context_on_synthetic_data() -> None:
+    """Runs without market data or trained models: point-in-time behaviour and the
+    sizing-volatility option on a synthetic universe with a volatility shock."""
+    import dataclasses
+    rng = np.random.default_rng(0)
+    days = pd.bdate_range("2018-01-01", "2020-12-31")
+    shock = (days >= "2020-03-01") & (days < "2020-04-15")
+    mkt = rng.normal(0.0004, 1.0, len(days)) * np.where(shock, 0.05, 0.01)
+    daily = {}
+    for s in list(UNIVERSE) + [INDEX_SYMBOL]:
+        r = mkt if s == INDEX_SYMBOL else mkt * rng.uniform(0.7, 1.2) + rng.normal(0, 0.008, len(days))
+        c = 100 * np.exp(np.cumsum(r))
+        daily[s] = pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99, "Close": c,
+                                 "Volume": 1e6}, index=days)
+    regime = lambda _idx: ("SIDEWAYS", 0.9, False)            # no HMM needed
+    ev_log = logging.getLogger(__name__)
+    level = ev_log.level
+    ev_log.setLevel(logging.ERROR)                             # EVT warns on short synthetic tails
+    try:
+        def ctx_for(asof, h, data=daily):
+            cfg = dataclasses.replace(CONFIG, sizing_vol_halflife_days=h)
+            return build_daily_context(data, asof, 500_000.0, cfg=cfg, manifest={"components": {}},
+                                       with_te=False, regime_fn=regime, holdings=[])
+
+        asof = date(2020, 10, 1)
+        base = ctx_for(asof, 0)
+        # point in time: a crash on and after the traded day must not change the decision
+        poisoned = {s: df.assign(Close=np.where(df.index >= pd.Timestamp(asof), 1.0, df["Close"]))
+                    for s, df in daily.items()}
+        assert ctx_for(asof, 0, poisoned).target_weights == base.target_weights, "look-ahead"
+        # the default sizes on the covariance window, exactly as v3 did
+        assert base.sizing_sigma == base.basket_sigma
+        # EWMA: harder cut inside the shock, faster recovery after it
+        inside, after = date(2020, 4, 10), asof
+        assert ctx_for(inside, 21).exposure < ctx_for(inside, 0).exposure
+        e21 = ctx_for(after, 21)
+        assert e21.exposure > base.exposure and e21.basket_sigma == base.basket_sigma
+    finally:
+        ev_log.setLevel(level)
+    print(f"[ok] synthetic context: no look-ahead; sizing on the 252-day window by default; after "
+          f"a shock EWMA(21) sizing restores exposure sooner ({base.exposure:.2f} -> "
+          f"{e21.exposure:.2f})")
+
+
 def _test_context_on_real_data() -> None:
     from market_data import ALL_SYMBOLS, DailyStore
 
@@ -699,4 +753,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     _test_rebalancer_rules()
     _test_toxicity_detects_one_sided_flow()
+    _test_context_on_synthetic_data()
     _test_context_on_real_data()

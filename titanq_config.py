@@ -105,6 +105,13 @@ class Config:
                                            # pre-2021 history). The v2 baseline used 0,
                                            # which kept the system ~85% in cash.
     max_exposure: float = 1.0              # never more than 100% of equity invested
+    sizing_vol_halflife_days: int = 0      # 0 = Kelly divides by the basket variance from the
+                                           # cov_lookback_days window (v3). >0 = an EWMA
+                                           # variance of the basket's daily returns with this
+                                           # half-life instead. Candidate fix for 2020 (the
+                                           # 252-day window kept exposure ~24% through the
+                                           # rebound); UNTESTED -- see
+                                           # reports/preregistration_sizing_vol.md.
 
     # ---- regime (Phase 11): exposure multiplier per regime ---------------------
     # Routine regimes do not cut exposure: timing overlays lowered returns without
