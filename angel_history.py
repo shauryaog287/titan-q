@@ -18,7 +18,9 @@ behaves like a cap of roughly 5,000 requests an hour. So:
 - the pace is 1.2 requests a second (4,320 an hour) across 4 worker threads;
 - a rate-limit answer pauses ALL workers together (5 minutes, doubling up to 30 while
   it persists), and does not count as a failed attempt, so no chunk is given up
-  because of it.
+  because of it. Network failures (including certificate errors: the Wi-Fi network
+  intercepts HTTPS to finance sites at times) are handled the same way. Certificate
+  checks are never switched off.
 
 Behaviour:
 - resumable: every finished chunk is a file (written atomically), and an existing
@@ -47,6 +49,7 @@ from datetime import date, datetime, time as dtime, timedelta
 from typing import List, Set, Tuple
 
 import pandas as pd
+import requests
 
 from titanq_config import DATA_DIR, PROJECT_DIR, UNIVERSE
 from market_data import IST, now_ist
@@ -134,13 +137,12 @@ class Downloader:
                 return
             time.sleep(min(left, 30.0))
 
-    def _hit_rate_limit(self) -> None:
+    def _hit_pause(self, why: str) -> None:
         with self.lock:
-            self.rate_limited += 1
             now = time.monotonic()
             if now >= self.pause_until:              # start one shared pause, not one per thread
                 self.pause_until = now + self.pause_len
-                log.warning("rate limit: all workers pause %.0f min", self.pause_len / 60)
+                log.warning("%s: all workers pause %.0f min", why, self.pause_len / 60)
                 self.pause_len = min(self.pause_len * 2, PAUSE_MAX)
 
     def _ok(self) -> None:
@@ -161,6 +163,11 @@ class Downloader:
             self.rate.wait()
             try:
                 r = self.api.getCandleData(params)
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                # includes SSLError: the Wi-Fi network intercepts HTTPS to finance sites at
+                # times (seen 2026-09-28 from 20:57). Wait for the network, do not give up.
+                self._hit_pause(f"network problem ({type(exc).__name__})")
+                continue
             except Exception as exc:
                 r = {"status": False, "message": str(exc)}
             if r and r.get("status"):
@@ -179,7 +186,8 @@ class Downloader:
                 return
             msg = str((r or {}).get("message", ""))
             if is_rate_limit(msg):
-                self._hit_rate_limit()        # shared pause; not a failed attempt
+                self.rate_limited += 1
+                self._hit_pause("rate limit")  # shared pause; not a failed attempt
                 continue
             attempt += 1
             if "token" in msg.lower() or "session" in msg.lower() or "invalid" in msg.lower():

@@ -28,7 +28,7 @@ import pandas as pd
 
 from titanq_config import CONFIG, PROJECT_DIR, UNIVERSE
 from market_data import IST, DailyStore
-from intraday_research import load_minutes
+from intraday_research import load_minutes, research_set_ready
 
 REPORT_DIR = os.path.join(PROJECT_DIR, "reports")
 DEV = ("2021-01-01", "2023-12-31")
@@ -271,6 +271,10 @@ def main() -> None:
     check()
     if a.check:
         return
+    ok, why = research_set_ready()
+    print(why, flush=True)
+    if not ok:
+        raise SystemExit(3)
     ev, dec = run(*DEV)
     dev = evaluate(ev, dec)
     ok = qualifies(dev)

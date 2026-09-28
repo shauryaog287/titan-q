@@ -239,6 +239,25 @@ def table(e: Dict) -> List[str]:
     return L
 
 
+PRIORITY_MARKER = os.path.join(DATA_DIR, "intraday_hist_priority_done.json")
+MAX_MISSING_SHARE = 0.005
+
+
+def research_set_ready() -> "tuple[bool, str]":
+    """The pre-registered runs need the downloaded research set essentially complete
+    (angel_history.py writes the marker after its sweeps). A run on partial data would
+    spend the one development look on the wrong sample."""
+    if not os.path.exists(PRIORITY_MARKER):
+        return False, "research set not downloaded yet (no marker); not running"
+    with open(PRIORITY_MARKER, encoding="ascii") as f:
+        m = json.load(f)
+    share = m["missing"] / max(m["chunks"], 1)
+    msg = f"research set: {m['chunks'] - m['missing']:,}/{m['chunks']:,} chunks ({100 * share:.2f}% missing)"
+    if share > MAX_MISSING_SHARE:
+        return False, msg + f"; more than {100 * MAX_MISSING_SHARE:.1f}% missing, not running"
+    return True, msg
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reveal-test", action="store_true")
@@ -253,6 +272,10 @@ def main() -> None:
                                               int(df[FEATURES].isna().sum().sum())))
         print("features:", len(FEATURES), "| decision times:", [t.strftime("%H:%M") for t in DECISION_ENDS])
         return
+    ok, why = research_set_ready()
+    print(why, flush=True)
+    if not ok:
+        raise SystemExit(3)
     if a.rebuild or not os.path.exists(CACHE):
         data = build_dataset()
         data.to_parquet(CACHE, index=True)

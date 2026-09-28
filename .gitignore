@@ -33,3 +33,4 @@ angel_credentials.json
 paper_account*.json
 titanq_live.lock
 forward_test.lock
+reports/radar/
