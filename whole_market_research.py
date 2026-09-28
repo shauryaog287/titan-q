@@ -63,7 +63,9 @@ def signals_at(px: pd.DataFrame, a: int, stocks: List[str]) -> pd.DataFrame:
     win = px.iloc[a - 252:a + 1]
     p = win[stocks]
     r = np.log(p).diff().iloc[1:]
-    ri = np.log(win[INDEX_SYMBOL]).diff().iloc[1:].to_numpy()
+    # Yahoo occasionally misses an index day that stocks traded on; carry the last
+    # index level over such gaps so beta is not NaN for every stock
+    ri = np.log(win[INDEX_SYMBOL].ffill().bfill()).diff().iloc[1:].to_numpy()
     rc = r.to_numpy() - r.to_numpy().mean(0)
     ric = ri - ri.mean()
     out = pd.DataFrame(index=stocks)
@@ -96,12 +98,16 @@ def monthly_study(px: pd.DataFrame, vol: pd.DataFrame, signal_names=SIGNALS,
             sig["COMPOSITE"] = z.mean(axis=1)
         enter, exit_ = a + 1, min(b + 1, len(idx) - 1)
         fwd = (px[stocks].iloc[exit_] / px[stocks].iloc[enter] - 1).dropna()
+        if len(fwd) < 50:            # e.g. the last rows, where only the index has a price
+            continue
         sig = sig.loc[fwd.index]
         med = float(fwd.median())
         row = {"date": idx[a], "n": len(fwd), "EW": float(fwd.mean())}
         names = list(signal_names) + (["COMPOSITE"] if composite else [])
         for name in names:
             s = sig[name].dropna()
+            if len(s) < 20:
+                continue
             f = fwd.loc[s.index]
             row[f"{name}_ic"] = stats.spearmanr(s, f).correlation
             ranked = s.sort_values(ascending=False)
@@ -158,10 +164,39 @@ def table(rows: List[Dict], title: str) -> List[str]:
     return L
 
 
+def composite_round2(reveal: bool) -> None:
+    """reports/preregistration_whole_market_round2.md: equal-weight z-score composite
+    of all seven signals. Development first; the test only if development passes."""
+    px, vol = load_panels()
+    df = monthly_study(px, vol, composite=list(SIGNALS))
+    dev = summarise(df, DEV, ["COMPOSITE"])
+    passed = dev[0]["qualifies"]
+    L = ["# Whole-market research, round 2: seven-signal composite", "",
+         "Implements reports/preregistration_whole_market_round2.md (same universe, timing and costs "
+         "as round 1).", ""]
+    L += table(dev, "Development (formation dates 2015-09 to 2020-12)")
+    L += [f"**Development bar (IC t >= {IC_T_MIN}, decile excess t >= {EXCESS_T_MIN}, hit > 50%): "
+          f"{'PASSED' if passed else 'FAILED -- stop; test stays unrevealed'}.**", ""]
+    result = {"development": dev, "passed": passed, "test_revealed": bool(reveal and passed)}
+    if reveal and passed:
+        test = summarise(df, TEST, ["COMPOSITE"])
+        L += table(test, "Test (formation dates 2021-01 to 2026-08), revealed once")
+        result["test"] = test
+    with open(os.path.join(REPORT_DIR, "whole_market_research_round2.md"), "w", encoding="ascii") as f:
+        f.write("\n".join(L) + "\n")
+    with open(os.path.join(REPORT_DIR, "whole_market_research_round2.json"), "w", encoding="ascii") as f:
+        json.dump(result, f, indent=2, default=float)
+    print("\n".join(L))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reveal-test", action="store_true")
+    ap.add_argument("--round2", action="store_true", help="seven-signal composite (round 2)")
     a = ap.parse_args()
+    if a.round2:
+        composite_round2(a.reveal_test)
+        return
     px, vol = load_panels()
     df = monthly_study(px, vol)
     dev = summarise(df, DEV, SIGNALS)
