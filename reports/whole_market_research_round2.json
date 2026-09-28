@@ -1,0 +1,30 @@
+{
+  "development": [
+    {
+      "signal": "COMPOSITE",
+      "months": 51,
+      "avg_stocks": 203.05882352941177,
+      "mean_ic": 0.05970633000579478,
+      "ic_t": 1.7757907467799026,
+      "dec_excess_ann": 0.08453379487863899,
+      "dec_excess_t": 1.3355825276103708,
+      "dec_hit_rel": 0.5362875663582749,
+      "dec_hit_abs": 0.5498787828933206,
+      "dec_month_hit": 0.6078431372549019,
+      "top30_excess_ann": 0.08946879191226872,
+      "top30_excess_t": 1.6053275929264783,
+      "top30_hit_rel": 0.5326797385620914,
+      "top30_hit_abs": 0.550326797385621,
+      "top30_month_hit": 0.5490196078431373,
+      "qualifies": false
+    },
+    {
+      "signal": "EW universe",
+      "months": 51,
+      "ann_return": 0.11335791473796115,
+      "sharpe": 0.4664751583945881
+    }
+  ],
+  "passed": false,
+  "test_revealed": false
+}
