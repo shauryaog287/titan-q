@@ -53,14 +53,19 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 | TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
-`after_download.ps1` and `after_m1.ps1` are one-off detached chains, logged to
-`logs\after_download.log`. Once the Angel minute download finishes, they:
-- retry failed chunks;
-- run the development halves of M1 (`intraday_research.py`) and of the VPIN gate test
-  (`vpin_research.py`), and commit their reports;
-- back up to Drive after market hours.
+`after_download.ps1` is a one-off detached chain, logged to `logs\after_download.log`.
+Once `angel_history.py` writes `data\intraday_hist_priority_done.json` (the research set is
+complete), it:
+- runs the development halves of M1 (`intraday_research.py`) and of the VPIN gate test
+  (`vpin_research.py`), and commits their reports;
+- after the whole download ends, runs one retry pass for failed chunks;
+- backs up to Drive after market hours.
 
-They never reveal a test period.
+It never reveals a test period.
+
+Angel's history API has a cap of roughly 5,000 requests an hour. Above it, every request is
+refused for about 50 minutes. `angel_history.py` therefore runs at 1.2 requests a second
+and pauses all workers together whenever it gets a rate-limit answer. Never raise the rate.
 
 ## Data and research (2026-09-28)
 

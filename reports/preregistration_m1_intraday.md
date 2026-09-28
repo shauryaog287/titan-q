@@ -82,3 +82,9 @@ Resolved in favour of the stated development period: the 12 months are counted f
 start of the downloaded history (2020-01-01), so 2021Q1 is predicted by a model trained on
 2020-01-31 to 2020-12-31. No other change. Only the feature pipeline had been run
 (`--smoke`, shapes only), so no result informed this choice.
+
+## Implementation note (2026-09-28 22:00 IST, before any M1 metric)
+
+`monthly_top` now takes its pool from the tradable universe (`universe.load_universe`, the
+set `angel_history.py` downloads) instead of the stock folders present on disk. The rule
+is unchanged. This only stops the selection from depending on how far the download has got.

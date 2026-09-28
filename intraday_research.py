@@ -128,10 +128,15 @@ def stock_dataset(symbol: str, mkt: pd.DataFrame) -> Optional[pd.DataFrame]:
 
 def monthly_top(n: int = TOP_N) -> Dict[pd.Period, List[str]]:
     """Point in time: at each month start, the n most liquid names by median 60-day
-    traded value from daily bars dated before that month."""
-    names = [d for d in os.listdir(HIST_DIR) if not d.endswith("_IDX")]
-    daily = DailyStore().load([s + ".NS" for s in names], refresh=False)
-    val = pd.DataFrame({s[:-3]: d["Close"] * d["Volume"] for s, d in daily.items()}).sort_index()
+    traded value from daily bars dated before that month. The pool is the tradable
+    universe that angel_history.py downloads (not the folders present so far, so the
+    answer does not depend on how far the download has got). Names are Angel symbols."""
+    from universe import load_universe
+    uni = load_universe()
+    tr = uni[uni["tier"] == "tradable"]
+    angel = dict(zip(tr["yahoo"], tr["symbol"].str.replace("-EQ", "", regex=False)))
+    daily = DailyStore().load(list(angel), refresh=False)
+    val = pd.DataFrame({angel[s]: d["Close"] * d["Volume"] for s, d in daily.items() if s in angel}).sort_index()
     out = {}
     for p in pd.period_range("2020-01", pd.Timestamp.today().strftime("%Y-%m"), freq="M"):
         past = val[val.index < p.start_time].iloc[-60:]
