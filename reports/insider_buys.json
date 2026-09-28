@@ -1,0 +1,69 @@
+{
+  "development": {
+    "primary": {
+      "events": 1158,
+      "stocks": 123,
+      "months": 51,
+      "mean_excess": 0.022811528558478743,
+      "median_excess": 0.00010877974202151437,
+      "month_t": 2.227814977450316,
+      "hit_rate": 0.5
+    },
+    "insider buys, 20 days": {
+      "events": 1158,
+      "stocks": 123,
+      "months": 51,
+      "mean_excess": 0.003141685320466004,
+      "median_excess": -0.0005547662888479845,
+      "month_t": 1.3619097446424042,
+      "hit_rate": 0.49568221070811747
+    },
+    "insider buys, 120 days": {
+      "events": 1158,
+      "stocks": 123,
+      "months": 51,
+      "mean_excess": 0.047795954186666975,
+      "median_excess": 0.004793533921979208,
+      "month_t": 3.088274682354976,
+      "hit_rate": 0.5077720207253886
+    },
+    "promoters / promoter group only": {
+      "events": 1013,
+      "stocks": 105,
+      "months": 51,
+      "mean_excess": 0.020585702932556776,
+      "median_excess": -0.0009890707142845108,
+      "month_t": 1.4227319771023585,
+      "hit_rate": 0.49358341559723595
+    },
+    "directors / key managers only": {
+      "events": 160,
+      "stocks": 58,
+      "months": 47,
+      "mean_excess": 0.04262575115969802,
+      "median_excess": 0.021440156044546067,
+      "month_t": 2.338631287607417,
+      "hit_rate": 0.5375
+    },
+    "buys of Rs. 1 crore or more": {
+      "events": 828,
+      "stocks": 104,
+      "months": 50,
+      "mean_excess": 0.02335299722270764,
+      "median_excess": 0.004004896778605883,
+      "month_t": 2.45800725419442,
+      "hit_rate": 0.5241545893719807
+    },
+    "insider SALES (negative = signal)": {
+      "events": 1830,
+      "stocks": 169,
+      "months": 51,
+      "mean_excess": -0.0018437225824471221,
+      "median_excess": -0.006941053222295285,
+      "month_t": -0.373701454937821,
+      "hit_rate": 0.48360655737704916
+    }
+  },
+  "qualifies": true,
+  "test_revealed": false
+}
