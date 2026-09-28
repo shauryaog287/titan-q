@@ -5,7 +5,10 @@
 ### Running now (unattended, survives this terminal closing)
 
 - **Angel 1-minute history download** (`angel_history.py`, pid 28340):
-  - 9,146 of 67,122 chunks done, about 99 a minute, expected to finish around 06:00;
+  - 9,146 of 67,122 chunks done at 20:08. By 20:20 the speed had dropped to about 70 a
+    minute, apparently near Angel's hourly cap, so the finish is expected between 07:00 and
+    09:00. If it is not done by 08:55, it pauses for the session and finishes after 15:50,
+    and M1 and VPIN then run tomorrow evening instead of tomorrow morning;
   - 98 chunks (1.3%) hit Angel's "exceeding access rate" limit; they are retried
     automatically;
   - it pauses itself at 08:55 on weekdays and resumes at 15:50.
