@@ -280,6 +280,11 @@ def _verified_ws_class():
             self.wsapp.run_forever(sslopt={"cert_reqs": ssl.CERT_REQUIRED, "ca_certs": certifi.where()},
                                    ping_interval=self.HEART_BEAT_INTERVAL)
 
+        def _on_close(self, wsapp, *args):
+            # websocket-client >= 1.x passes (ws, close_status_code, close_msg); the SDK's
+            # _on_close accepts only (ws) and raised a TypeError on every shutdown
+            self.on_close(wsapp)
+
     return VerifiedWebSocket
 
 
