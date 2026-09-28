@@ -23,6 +23,12 @@ logs/
 # Market data cache (re-downloadable; intraday archive grows daily)
 data/
 
+# Broker credentials: NEVER commit
+angel_credentials.json
+*credentials*.json
+!angel_credentials.example.json
+.env
+
 # Paper trading account (live ledger; delete it to reset the account)
 paper_account*.json
 titanq_live.lock
