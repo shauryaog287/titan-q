@@ -73,7 +73,7 @@ The sign of the stock's return from t to t + 30 minutes (5-minute close to close
 - The 10 bps cost is realistic for liquid stocks with a discount broker, but slippage on
   larger orders would be higher.
 
-## Amendment 1 (2026-09-28 20:05 IST, before any M1 metric was computed)
+## Amendment 1 (2026-09-28 19:53 IST, before any M1 metric was computed)
 
 The rule "at least 12 months" of training conflicted with "development predictions from
 2021-01": the features need a 20-trading-day warm-up, so the first usable row is about
