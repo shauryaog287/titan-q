@@ -67,10 +67,21 @@ the session the loop does five things:
    cooldown, a cash check and no buys in the last 10 minutes;
 5. queues market orders to the engine.
 
+## Strategy (v3, decided 2026-09-27)
+
+Set in `titanq_config.py` per `reports/decision_2026-09-27.md` (whitepaper 10.5-10.6):
+hold every eligible stock (`selection_mode="all"`), inverse-volatility weights, no alpha tilt
+(`alpha_ic=0`), quarter Kelly with an informative market prior (10%/yr, sd 3%), capped at
+100%. Regimes other than CRASH use multiplier 1.0; CRASH -> 0, a novel regime x0.5 and the
+EVT trim x0.5 are catastrophe limits only. The v3 backtest (2019-2026) is CAGR 5.9%,
+Sharpe 0.59, against 7.7% for NIFTY at the same 70% average exposure; the whole gap is 2020,
+where quarter Kelly on a 252-day variance kept exposure near 24% through the rebound.
+The concentrated K-of-N mode (`"optimize"`) and HRP weighting remain available, not default.
+
 ## Model status (manifest of 2026-09-26)
 
-- HMM regime: ON. Four volatility regimes, stable fit. Labels are decided on raw means
-  (a standardised-means bug was fixed).
+- HMM regime: ON, as a catastrophe limit (see above). Four volatility regimes, stable fit.
+  Labels are decided on raw means (a standardised-means bug was fixed).
 - Neural SDE: OFF. It lost to a constant GBM on held-out data, so GBM drift and
   volatility are used.
 - PPO policy: OFF. Out of sample (2021-04 to 2026-09) a long/flat version scored Sortino
@@ -87,8 +98,9 @@ the session the loop does five things:
 
 - The universe is a fixed list of about 2023 NIFTY 50 names, with TMPV.NS in place of
   TATAMOTORS.NS. It is not today's index.
-- The momentum alpha (IC 0.04) is a documented baseline, not a proven edge. Read
-  `reports/backtest_daily_report.md` for what it actually did, and for the biases:
+- No stock-selection signal showed an edge (`reports/alpha_research.md`), so v3 has no
+  alpha tilt; the momentum code stays for the "optimize" mode. Read
+  `reports/backtest_daily_report.md` for what the strategy actually did, and for the biases:
   survivorship, NIFTY as a price index, cash earning 0%.
 - Yahoo 1-minute bars can lag a minute or two. There is no order book and no tick data.
 - The regime model's labels are volatility regimes. Over 2015-2026 even the most volatile

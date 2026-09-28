@@ -1242,27 +1242,35 @@ Work toward a profitable configuration continues from this baseline. Candidate c
 | NIFTY 50 buy-and-hold | 10.6% | 17.3% | 0.67 | 0.92 | 38.4% | 114.4% |
 | NIFTY at v3's average exposure (70%) | 7.7% | 12.1% | 0.67 | 0.92 | 28.5% | 74.9% |
 
-Version 3 roughly tripled the baseline's return. It still trails a passive NIFTY position of the same average size, and the gap is one year. In 2020 the catastrophe limits did what they were built to do: they cut exposure after the COVID crash. Exposure then stayed low through the rebound, so the year returned -11.8% against NIFTY's +14.9%. The limits held the maximum drawdown to 24% against 38%, but on this evidence they cost more than they saved. This is the familiar failure of crash rules: they sell after the fall, and the recovery is fast.
+Version 3 roughly tripled the baseline's return. It still trails a passive NIFTY position of the same average size, and the gap is one year: excluding 2020, v3 compounds to 1.75x against 1.57x for NIFTY at 70%. In 2020 the strategy returned -11.8% against NIFTY's +14.9%. The equity curve (`reports/backtest_daily_equity.csv`) shows three causes, and the Kelly sizer, not the catastrophe limits, is the main one:
+
+- *March-April 2020:* a x0.5 limit (a novel regime or the EVT trim) cut exposure after the fall, to about 0.45 of the volatility-implied Kelly fraction. The CRASH limit never fired; no day in 2020 was labelled CRASH.
+- *Mid-May 2020 to January 2021:* no limit was active. Exposure stayed near 24% because quarter Kelly divides by the variance of a 252-day window, and that window kept the March 2020 volatility for a full year. Target exposure tracked about 0.9 of $0.25 \times 0.09 / \sigma^2_{252}$ throughout the rebound.
+- *February-May 2021:* the regime model refit on data that included 2020 labelled the post-crash state CRASH, and exposure went to zero for several weeks while the market rose.
+
+The drawdown held to 24% against 38%, but on this evidence the sizing cost more than it saved. This is the familiar failure of crash rules: they sell after the fall, and the recovery is fast. Here the slow part was the one-year variance window, not the shields. Any change (a shorter or exponentially weighted variance, for example) must be chosen on 2015-2020 data under the same protocol.
 <!-- BACKTEST_RESULTS_END -->
 
-### 10.6 Integration status, version 2
+### 10.6 Integration status, version 3
 
-| Phase | Status in v2 | Fed by |
+Version 3 (the configuration decided in `reports/decision_2026-09-27.md`) changes how the version 2 components are used, not which ones exist.
+
+| Phase | Status in v3 | Fed by |
 |---|---|---|
-| 4 Kelly | **on**, sizes the actual basket | basket mean and covariance, ten-year span |
+| 4 Kelly | **on**, sizes the whole basket; informative prior on the market return (10% a year, sd 3%), quarter Kelly, capped at 100% | basket mean and covariance (252-day window), ten-year span |
 | 5 PPO | off (loses out of sample) | would be: NIFTY daily closes |
-| 11 HMM | **on**, volatility-regime scaler | NIFTY daily return and realised variance |
-| 12 HRP | **on** | Ledoit-Wolf covariance of the selection |
+| 11 HMM | **on**, catastrophe limit only: CRASH -> 0, a novel regime x0.5; other regimes x1.0 | NIFTY daily return and realised variance |
+| 12 HRP | available (`weighting = "hrp"`), not the default; inverse volatility is used | Ledoit-Wolf covariance of the basket |
 | 13 Copula | not used | - |
 | 14 VPIN | **on**, intraday buy gate | real 1-minute bars |
 | 14 Hawkes | unavailable | needs trade timestamps |
 | 16 Spoof AE | unavailable | needs order-book depth |
 | 17 Signatures | not used | - |
 | 18 TFT | unavailable (and lost to a logistic baseline) | needs order-book depth |
-| 20 Selection | **on**, exact enumeration plus hysteresis | momentum alpha, GBM drift, betas |
+| 20 Selection | available (`selection_mode = "optimize"`), not the default; every eligible stock is held | - |
 | 21 Neural SDE | off (loses to GBM out of sample) | GBM estimates used instead |
 | 22 HJB | not used (market-making model; the strategy trades directionally) | - |
-| 23 EVT | **on**, relative ES trim | basket and index daily losses |
+| 23 EVT | **on**, relative ES trim x0.5 (catastrophe limit) | basket and index daily losses |
 | 24 Transfer entropy | **on**, diagnostic with surrogates | daily returns |
 | Engine / broker | **on**, fills reported, costs realistic | feed prices |
 
@@ -1270,11 +1278,13 @@ Version 3 roughly tripled the baseline's return. It still trails a passive NIFTY
 
 In order of expected value:
 
-1. **Alpha research.** Everything downstream of the expected returns is now sound, but the expected returns are a baseline. A genuine edge has to be found and validated with the same walk-forward harness.
-2. **Point-in-time universe.** Historical NIFTY 50 membership would remove the survivorship bias.
-3. **Cash management.** Idle cash in a liquid fund, which the backtest does not credit.
-4. **A depth feed.** A recorded Kite depth feed would make the transformer, spoofing autoencoder and Hawkes filter trainable on real data.
-5. **Intraday execution.** An optimal-execution schedule for larger orders, using the Section 5.1 control machinery with one side switched off.
+1. **Sizing after a volatility shock.** The 2020 loss in Section 10.5 came mainly from quarter Kelly dividing by a 252-day variance that remembered March 2020 for a year. A shorter or exponentially weighted variance for sizing is the most direct candidate. It must be chosen on 2015-2020 data and confirmed once on 2021-2026, as in the alpha research.
+2. **Regime refits.** The regime model refit for 2021 labelled the post-COVID rally CRASH. Whether the CRASH limit earns its place should be tested on development data with the same protocol.
+3. **Alpha research.** Seven documented signals showed no edge in development (Section 10.5). One-month reversal is the only lead, and it needs fresh out-of-sample data before it can be traded.
+4. **Point-in-time universe.** Historical NIFTY 50 membership would remove the survivorship bias.
+5. **Cash management.** Idle cash in a liquid fund, which the backtest does not credit.
+6. **A depth feed.** A recorded Kite depth feed would make the transformer, spoofing autoencoder and Hawkes filter trainable on real data.
+7. **Intraday execution.** An optimal-execution schedule for larger orders, using the Section 5.1 control machinery with one side switched off.
 
 ---
 
