@@ -1,0 +1,146 @@
+{
+  "window": [
+    "2016-01-04",
+    "2020-12-31"
+  ],
+  "trading_days": 1228,
+  "initial_capital": 500000.0,
+  "strategy": {
+    "cagr": 0.08526331368022011,
+    "ann_vol": 0.09502466942389427,
+    "sharpe": 0.9087342595788341,
+    "sortino": 1.27756268659075,
+    "max_drawdown": 0.1629270153625043,
+    "calmar": 0.5233221359300886,
+    "total_return": 0.48943722151867997
+  },
+  "benchmarks": {
+    "nifty_price_index_buy_and_hold": {
+      "cagr": 0.12760325847359777,
+      "ann_vol": 0.1822297643284309,
+      "sharpe": 0.7512780930382011,
+      "sortino": 1.025157778780348,
+      "max_drawdown": 0.38439852452742107,
+      "calmar": 0.33195564064787453,
+      "total_return": 0.7945336914885657
+    },
+    "equal_weight_universe_buy_and_hold": {
+      "cagr": 0.18586066530847978,
+      "ann_vol": 0.18830428742836394,
+      "sharpe": 1.0008265976237751,
+      "sortino": 1.3668512284392795,
+      "max_drawdown": 0.3834509344302105,
+      "calmar": 0.4847052089849767,
+      "total_return": 1.293366343943363
+    },
+    "nifty_at_strategy_average_exposure": {
+      "cagr": 0.08825512205097907,
+      "ann_vol": 0.12267618556353455,
+      "sharpe": 0.7512780930381917,
+      "sortino": 1.025157778780335,
+      "max_drawdown": 0.2746465667766069,
+      "calmar": 0.32134070739272835,
+      "total_return": 0.509536520086904
+    }
+  },
+  "yearly": {
+    "strategy": {
+      "2016": 0.036596646624015294,
+      "2017": 0.2834965152655886,
+      "2018": 0.06676963595288132,
+      "2019": 0.0604832982783734,
+      "2020": -0.010437496647603961
+    },
+    "nifty": {
+      "2016": 0.05063340006023864,
+      "2017": 0.2864595331640314,
+      "2018": 0.03151258731330264,
+      "2019": 0.12022042836217595,
+      "2020": 0.14901649557525531
+    },
+    "equal_weight": {
+      "2016": 0.1271977946143974,
+      "2017": 0.419731223608623,
+      "2018": 0.017565461644524438,
+      "2019": 0.14284186402951016,
+      "2020": 0.23230630957176834
+    }
+  },
+  "average_invested": 0.6731951062749357,
+  "days_fully_in_cash": 69,
+  "trades": 2576,
+  "rejected_orders": 0,
+  "fees_paid": 13942.720614879563,
+  "annual_turnover": 4.057625621041667,
+  "regime_days": {
+    "BEAR": 496,
+    "BULL": 262,
+    "SIDEWAYS": 261,
+    "HIGH_VOL": 152,
+    "CRASH": 57
+  },
+  "regime_models": {
+    "2016": [
+      "BULL",
+      "SIDEWAYS",
+      "BEAR",
+      "CRASH"
+    ],
+    "2017": [
+      "BULL",
+      "HIGH_VOL",
+      "SIDEWAYS",
+      "BEAR"
+    ],
+    "2018": [
+      "BULL",
+      "HIGH_VOL",
+      "SIDEWAYS",
+      "BEAR"
+    ],
+    "2019": [
+      "BULL",
+      "SIDEWAYS",
+      "BEAR",
+      "CRASH"
+    ],
+    "2020": [
+      "BULL",
+      "SIDEWAYS",
+      "HIGH_VOL",
+      "BEAR"
+    ]
+  },
+  "variant": "ewma_vol_21",
+  "settings": {
+    "selection_mode": "all",
+    "weighting": "inverse_vol",
+    "n_select": 4,
+    "kelly_fraction": 0.25,
+    "kelly_prior_edge_vol": 0.03,
+    "prior_market_return": 0.1,
+    "alpha_ic": 0.0,
+    "cov_lookback_days": 252,
+    "rebalance_band": 0.2,
+    "min_trade_value": 2000.0,
+    "es_relative_threshold": 1.5,
+    "es_trim": 0.5,
+    "regime_multipliers": {
+      "BULL": 1.0,
+      "SIDEWAYS": 1.0,
+      "HIGH_VOL": 1.0,
+      "BEAR": 1.0,
+      "CRASH": 0.0,
+      "UNKNOWN": 0.5
+    },
+    "novel_regime_multiplier": 0.5,
+    "sizing_vol_halflife_days": 21
+  },
+  "biases": [
+    "survivorship (today's universe applied to the past)",
+    "NIFTY is a price index; stocks include dividends",
+    "cash earns 0%",
+    "no VPIN toxicity (no historical 1-minute data)"
+  ],
+  "seconds": 319.3
+}
