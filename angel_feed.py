@@ -363,11 +363,20 @@ def cmd_check() -> None:
 
 def cmd_record(until: Optional[str] = None) -> None:
     session = Session()
+    now = now_ist()
+    if not until and (now.weekday() >= 5 or now >= session.bounds(now.date())[1]):
+        log.info("market closed today (%s); nothing to record", now.strftime("%a %d %b %H:%M IST"))
+        return
+    try:
+        creds = load_credentials()
+    except RuntimeError as exc:
+        log.error("%s Recording skipped.", exc)
+        return
     eq = nse_equities(load_scrip_master())
     tokens = eq["token"].tolist()
-    api, jwt, feed, client = login()
+    api, jwt, feed, client = login(creds)
     rec = TickRecorder()
-    stream = MarketStream(jwt, load_credentials()["api_key"], client, feed, tokens, rec)
+    stream = MarketStream(jwt, creds["api_key"], client, feed, tokens, rec)
     stream.start()
     end = (datetime.combine(now_ist().date(), datetime.strptime(until, "%H:%M").time(), IST)
            if until else session.bounds(now_ist().date())[1] + timedelta(minutes=5))
@@ -454,12 +463,19 @@ if __name__ == "__main__":
     import sys
     import tempfile
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="log in and print a few live quotes")
     ap.add_argument("--record", action="store_true", help="record today's session")
     ap.add_argument("--until", default=None, help="record until HH:MM IST (default: close + 5 min)")
     a = ap.parse_args()
+    handlers = [logging.StreamHandler()]
+    if a.record:
+        logs = os.path.join(PROJECT_DIR, "logs")
+        os.makedirs(logs, exist_ok=True)
+        handlers.append(logging.FileHandler(
+            os.path.join(logs, datetime.now().strftime("angel_record_%Y-%m-%d.log")), encoding="utf-8"))
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s",
+                        handlers=handlers, force=True)
     if a.check:
         cmd_check()
     elif a.record:

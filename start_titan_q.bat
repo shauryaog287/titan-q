@@ -18,6 +18,12 @@ echo.
 start "Titan-Q Master Brain" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\main_trading_loop.py"
 echo [OK] Master Trading Loop Armed.
 
+:: Launch the Angel One tick + order-book recorder (read-only; whole NSE market).
+:: It exits by itself on weekends, after the close, or if angel_credentials.json
+:: is not set up yet. Log: logs\angel_record_*.log
+start "Titan-Q Tick Recorder" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\angel_feed.py --record"
+echo [OK] Tick Recorder Started.
+
 :: Launch the Web Dashboard server (localhost only)
 start "Titan-Q Web Dashboard" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\dashboard_server.py"
 echo [OK] Live Web Dashboard Running on http://localhost:5000

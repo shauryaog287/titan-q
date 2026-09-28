@@ -98,6 +98,21 @@ def acquire_live_lock():
     return f
 
 
+def start_forward_test() -> None:
+    """Launch the after-close forward-test update (reports/forward_test/) as its own
+    process, so this session can exit while it downloads the day's closes."""
+    import subprocess
+    import sys
+    try:
+        out = open(os.path.join(LOGS_DIR, datetime.now().strftime("forward_test_%Y-%m-%d.log")), "a")
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen([sys.executable, os.path.join(PROJECT_DIR, "forward_test.py")], cwd=PROJECT_DIR,
+                         stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
+        log.info("forward-test update started (log: logs\\forward_test_%s.log)", datetime.now().strftime("%Y-%m-%d"))
+    except Exception as exc:
+        log.warning("could not start the forward-test update: %s", exc)
+
+
 def write_json_atomic(path: str, obj: Dict) -> None:
     """Write-then-rename, so the dashboard never reads a half-written file."""
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_", suffix=".json")
@@ -255,6 +270,7 @@ class Orchestrator:
                                                    + SHUTDOWN_AFTER_CLOSE):
                     await asyncio.to_thread(self.feed.store.archive, self.feed._bars)
                     self.finish(f"SESSION {now.date()} CLOSED")
+                    start_forward_test()
                     self.engine._running = False
                     return
             except Exception:
