@@ -60,7 +60,13 @@ def backup_minutes(dry: bool) -> int:
         n += 1
         if dry:
             continue
-        parts = [pd.read_parquet(os.path.join(src, f)) for f in os.listdir(src) if f.endswith(".parquet")]
+        parts = []
+        for f in os.listdir(src):
+            if f.endswith(".parquet"):
+                try:
+                    parts.append(pd.read_parquet(os.path.join(src, f)))
+                except Exception as exc:          # a chunk still being written by angel_history.py
+                    log.warning("skipped unreadable %s\\%s: %s", sym, f, exc)
         parts = [p for p in parts if len(p)]
         if not parts:
             continue

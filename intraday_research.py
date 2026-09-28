@@ -29,6 +29,7 @@ from market_data import DailyStore
 HIST_DIR = os.path.join(DATA_DIR, "intraday_hist")
 REPORT_DIR = os.path.join(PROJECT_DIR, "reports")
 CACHE = os.path.join(DATA_DIR, "m1_dataset.parquet")
+HIST_START = "2020-01-01"                      # first date requested from Angel
 DEV = ("2021-01-01", "2023-12-31")
 TEST = ("2024-01-01", "2026-09-30")
 TOP_N = 100
@@ -166,7 +167,13 @@ def walk_forward(data: pd.DataFrame, start: str, end: str, min_months: int = 12)
     from sklearn.preprocessing import StandardScaler
 
     dates = pd.to_datetime(data["date"])
+    # Months of history are counted from the start of the download, not from the first
+    # usable row (the 20-day warm-up would otherwise push the first development quarter
+    # from 2021Q1 to 2021Q2). Pre-registration amendment 1, made before any M1 metric.
+    # (Only when the data really starts near HIST_START; otherwise the first row counts.)
     first = dates.min()
+    if (first - pd.Timestamp(HIST_START)).days <= 45:
+        first = min(first, pd.Timestamp(HIST_START))
     out = []
     for q in pd.period_range(start, end, freq="Q"):
         train = data[dates < q.start_time]

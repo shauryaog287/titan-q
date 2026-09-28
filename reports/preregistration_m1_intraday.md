@@ -72,3 +72,13 @@ The sign of the stock's return from t to t + 30 minutes (5-minute close to close
   today's listed stocks are still the pool (survivorship).
 - The 10 bps cost is realistic for liquid stocks with a discount broker, but slippage on
   larger orders would be higher.
+
+## Amendment 1 (2026-09-28 20:05 IST, before any M1 metric was computed)
+
+The rule "at least 12 months" of training conflicted with "development predictions from
+2021-01": the features need a 20-trading-day warm-up, so the first usable row is about
+2020-01-31, and a 360-day minimum measured from that row would have skipped 2021Q1.
+Resolved in favour of the stated development period: the 12 months are counted from the
+start of the downloaded history (2020-01-01), so 2021Q1 is predicted by a model trained on
+2020-01-31 to 2020-12-31. No other change. Only the feature pipeline had been run
+(`--smoke`, shapes only), so no result informed this choice.
