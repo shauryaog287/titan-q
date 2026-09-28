@@ -33,4 +33,7 @@ echo =======================================================
 echo SYSTEM LIVE. PAPER TRADING DURING NSE HOURS (09:15-15:30 IST).
 echo To safely shut down, close all command windows.
 echo =======================================================
-pause
+:: No "pause" here: the scheduled task counts as running until this script ends, and
+:: with "do not start a new instance" a window left waiting at a pause would make
+:: Task Scheduler skip the next day's 09:10 start. The three windows above stay open.
+timeout /t 20 >nul
