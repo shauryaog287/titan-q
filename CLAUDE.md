@@ -78,6 +78,18 @@ Sharpe 0.59, against 7.7% for NIFTY at the same 70% average exposure; the whole 
 where quarter Kelly on a 252-day variance kept exposure near 24% through the rebound.
 The concentrated K-of-N mode (`"optimize"`) and HRP weighting remain available, not default.
 
+v3.1 (2026-09-28): Kelly now divides by an EWMA variance of the basket with a 21-day half-life
+(`sizing_vol_halflife_days=21`) instead of the 252-day window. It was adopted through the
+pre-registered protocol in `reports/preregistration_sizing_vol.md`:
+- development 2016-2020: Sharpe 0.91 vs 0.65, max drawdown 16.3% vs 23.9%;
+- test 2021-2026: Sharpe 0.91 vs 0.85, a small gain, with about 45% more trades.
+
+The decisions are in `reports/decision_sizing_vol_{dev,test}.md`. The next open question for
+the same protocol is whether the CRASH, novel and EVT limits earn their place: the strategy was
+fully in cash on 102 days in 2021-2026. `sizing_experiment_decide.py` applies a written rule
+mechanically. Keep that pattern: write the rule, run development, commit the decision, then
+run the test once.
+
 ## Model status (manifest of 2026-09-26)
 
 - HMM regime: ON, as a catastrophe limit (see above). Four volatility regimes, stable fit.

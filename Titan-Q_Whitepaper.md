@@ -1249,6 +1249,20 @@ Version 3 roughly tripled the baseline's return. It still trails a passive NIFTY
 - *February-May 2021:* the regime model refit on data that included 2020 labelled the post-crash state CRASH, and exposure went to zero for several weeks while the market rose.
 
 The drawdown held to 24% against 38%, but on this evidence the sizing cost more than it saved. This is the familiar failure of crash rules: they sell after the fall, and the recovery is fast. Here the slow part was the one-year variance window, not the shields. Any change (a shorter or exponentially weighted variance, for example) must be chosen on 2015-2020 data under the same protocol.
+
+**Version 3.1: sizing on a faster volatility estimate (28 September 2026).** The protocol ran exactly as pre-registered in `reports/preregistration_sizing_vol.md`. Three sizing variances were compared: the 252-day window (v3), and EWMA variances of the basket's daily returns with 21-day and 63-day half-lives. The decision rule was written before any run, and a script (`sizing_experiment_decide.py`) applied it mechanically to the development results. The decision was committed (`a854631`) before the single test run.
+
+| | Development 2016-2020 | | | Test 2021-2026 | | |
+|---|---|---|---|---|---|---|
+| | CAGR | Sharpe | Max DD | CAGR | Sharpe | Max DD |
+| v3 (252-day window) | 6.2% | 0.65 | 23.9% | 8.8% | 0.85 | 16.0% |
+| EWMA, 21-day half-life | 8.5% | 0.91 | 16.3% | 8.9% | 0.91 | 15.2% |
+| EWMA, 63-day half-life | 6.6% | 0.71 | 20.2% | not run | | |
+| NIFTY buy-and-hold | | | | 9.3% | 0.70 | 17.2% |
+
+Both EWMA variants passed the development rule, and the 21-day variant had the higher Sharpe. In the test it did not fall below v3's Sharpe (0.91 against 0.85), so it is adopted as the default. The honest reading is modest. The large development gain came from 2020, the episode that suggested the idea. In the test the improvement is small and within noise, and it costs about 45% more trades (fees are included in the figures). Out of sample the change does no harm and slightly reduces risk.
+
+Both versions were fully in cash on 102 test-period days, because the 2021 regime refit labelled the post-COVID rally CRASH. An exploratory run with every limit removed and full Kelly (`reports/exploratory_market_variant.md`) returned 16.4% a year from 2019 to 2026 (Sharpe 1.09, maximum drawdown 33%). That run was made after the v3 results had been seen, so it is not evidence. It does mark the catastrophe limits as the next question for the protocol, with the caveat that this knowledge now contaminates the development period.
 <!-- BACKTEST_RESULTS_END -->
 
 ### 10.6 Integration status, version 3
@@ -1278,7 +1292,7 @@ Version 3 (the configuration decided in `reports/decision_2026-09-27.md`) change
 
 In order of expected value:
 
-1. **Sizing after a volatility shock.** The 2020 loss in Section 10.5 came mainly from quarter Kelly dividing by a 252-day variance that remembered March 2020 for a year. A shorter or exponentially weighted variance for sizing is the most direct candidate. It must be chosen on 2015-2020 data and confirmed once on 2021-2026, as in the alpha research.
+1. **Sizing after a volatility shock: done (v3.1).** A 21-day-half-life EWMA variance replaced the 252-day window for Kelly sizing, adopted through the pre-registered protocol (Section 10.5).
 2. **Regime refits.** The regime model refit for 2021 labelled the post-COVID rally CRASH. Whether the CRASH limit earns its place should be tested on development data with the same protocol.
 3. **Alpha research.** Seven documented signals showed no edge in development (Section 10.5). One-month reversal is the only lead, and it needs fresh out-of-sample data before it can be traded.
 4. **Point-in-time universe.** Historical NIFTY 50 membership would remove the survivorship bias.

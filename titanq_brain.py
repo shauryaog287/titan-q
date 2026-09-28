@@ -704,7 +704,7 @@ def _test_context_on_synthetic_data() -> None:
         poisoned = {s: df.assign(Close=np.where(df.index >= pd.Timestamp(asof), 1.0, df["Close"]))
                     for s, df in daily.items()}
         assert ctx_for(asof, 0, poisoned).target_weights == base.target_weights, "look-ahead"
-        # the default sizes on the covariance window, exactly as v3 did
+        # half-life 0 sizes on the covariance window, exactly as v3 did
         assert base.sizing_sigma == base.basket_sigma
         # EWMA: harder cut inside the shock, faster recovery after it
         inside, after = date(2020, 4, 10), asof
@@ -713,7 +713,7 @@ def _test_context_on_synthetic_data() -> None:
         assert e21.exposure > base.exposure and e21.basket_sigma == base.basket_sigma
     finally:
         ev_log.setLevel(level)
-    print(f"[ok] synthetic context: no look-ahead; sizing on the 252-day window by default; after "
+    print(f"[ok] synthetic context: no look-ahead; half-life 0 sizes on the 252-day window; after "
           f"a shock EWMA(21) sizing restores exposure sooner ({base.exposure:.2f} -> "
           f"{e21.exposure:.2f})")
 
