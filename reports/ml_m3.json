@@ -1,0 +1,34 @@
+{
+  "development": {
+    "p_logit": {
+      "days": 1010,
+      "traded_days": 644,
+      "accuracy_traded": 0.5217391304347826,
+      "accuracy_all_days": 0.5188118811881188,
+      "mean_net_bps": 0.6051111984977203,
+      "t": 0.24827155675134355,
+      "sharpe": 0.12401281075918502
+    },
+    "p_gbm": {
+      "days": 1010,
+      "traded_days": 746,
+      "accuracy_traded": 0.5241286863270778,
+      "accuracy_all_days": 0.5178217821782178,
+      "mean_net_bps": 1.048914349661083,
+      "t": 0.37562270741686166,
+      "sharpe": 0.18762530972645503
+    },
+    "always_long": {
+      "days": 1010,
+      "accuracy_all_days": 0.45742574257425744,
+      "mean_net_bps": -12.612432612253114,
+      "sharpe": -2.0879327594940573
+    }
+  },
+  "qualifies": {
+    "p_logit": false,
+    "p_gbm": false
+  },
+  "candidate": null,
+  "test_revealed": false
+}

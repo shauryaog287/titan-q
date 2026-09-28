@@ -16,8 +16,9 @@ Behaviour:
 - newest chunks first, so recent data is usable while older data is still downloading;
 - paused 08:55-15:50 IST on weekdays, so it never competes with the live recorder
   (a second login during the session could end the recorder's session);
-- rate-limited to about 2.5 requests a second across 3 worker threads, with backoff
-  on errors and a fresh login if the session expires.
+- rate-limited to about 2.5 requests a second across 8 worker threads (a request
+  takes 2-3 s, so fewer workers cannot reach the cap), with backoff on errors and a
+  fresh login if the session expires.
 
 Files: data/intraday_hist/<symbol>/<from>_<to>.parquet
        columns ts (IST), open, high, low, close, volume.
@@ -142,7 +143,8 @@ def main() -> None:
              len(targets), len(windows), len(jobs))
     dl = Downloader()
     t0, last = time.time(), time.time()
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # each request takes 2-3 s, so several workers are needed to reach the rate cap
+    with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(dl.fetch, *j) for j in jobs]
         for i, f in enumerate(futures):
             f.result()
