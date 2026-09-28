@@ -45,6 +45,39 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
   Paths come from the location of `titanq_config.py` (or `TITANQ_HOME`), so the code also
   runs on Linux.
 
+## Scheduled and unattended jobs (Windows Task Scheduler)
+
+| Task | When | What |
+|---|---|---|
+| TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop, Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
+| TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
+| TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
+
+`after_download.ps1` and `after_m1.ps1` are one-off detached chains, logged to
+`logs\after_download.log`. Once the Angel minute download finishes, they:
+- retry failed chunks;
+- run the development halves of M1 (`intraday_research.py`) and of the VPIN gate test
+  (`vpin_research.py`), and commit their reports;
+- back up to Drive after market hours.
+
+They never reveal a test period.
+
+## Data and research (2026-09-28)
+
+- Angel One SmartAPI is read-only in code (`angel_feed.py`, `ReadOnlySmartConnect` blocks
+  order methods). Credentials are in the git-ignored `angel_credentials.json`; never print
+  or commit them.
+- `angel_history.py` downloads 1-minute candles (2020 onward) for about 700 tradable stocks
+  plus NIFTY and BANKNIFTY. They go to `data/intraday_hist/`, and the download pauses
+  08:55-15:50 IST on weekdays.
+- Pre-registered studies are in `reports/preregistration_*.md`. Results so far:
+  - no single whole-market signal qualified;
+  - the composite is in a forward paper test (`forward_test.py`, `reports/forward_test/`);
+  - M2 and M3 did not qualify;
+  - M1 and the VPIN gate test are pending the download.
+- NIFTY opens: Yahoo's daily open equals Angel's 09:15 candle open (checked on 125 days in
+  2026). The open-to-close drift question awaits the full history.
+
 ## Architecture (v2)
 
 | File | Role |
