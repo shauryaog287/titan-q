@@ -8,8 +8,10 @@ the whole liquid NSE market, rebalanced monthly on a separate paper account.
     D:\\trader_env\\Scripts\\python.exe forward_test.py            update for the latest close
     D:\\trader_env\\Scripts\\python.exe forward_test.py --report   print the running record
 
-main_trading_loop.py starts it automatically after each live session. It is
-idempotent: running it twice for the same close changes nothing.
+main_trading_loop.py starts it automatically after each live session, and the scheduled
+task TitanQ_Forward_Test runs it at 16:30 on weekdays as a fallback. It is idempotent:
+running it twice for the same close changes nothing, and a lock file stops two copies
+from running at once.
 """
 
 from __future__ import annotations
@@ -179,6 +181,24 @@ def report() -> None:
     print(f"  NIFTY: {100 * (last['nifty'] / first['nifty'] - 1):+.2f}% over the record")
 
 
+def _single_instance():
+    """Non-blocking OS lock, so the post-session launch and the 16:30 scheduled task
+    (TitanQ_Forward_Test) can never record the same close twice. None if held."""
+    f = open(os.path.join(PROJECT_DIR, "forward_test.lock"), "a+")
+    try:
+        f.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -186,4 +206,11 @@ if __name__ == "__main__":
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--force", action="store_true", help="record even if the latest close is not today")
     a = ap.parse_args()
-    report() if a.report else update(force=a.force)
+    if a.report:
+        report()
+    else:
+        lock = _single_instance()
+        if lock is None:
+            log.info("another forward-test update is running; nothing to do")
+        else:
+            update(force=a.force)

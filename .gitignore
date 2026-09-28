@@ -32,3 +32,4 @@ angel_credentials.json
 # Paper trading account (live ledger; delete it to reset the account)
 paper_account*.json
 titanq_live.lock
+forward_test.lock
