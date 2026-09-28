@@ -102,7 +102,10 @@ run the test once.
 - TFT (18), spoofing autoencoder (16) and Hawkes (14, trade-arrival part): UNAVAILABLE.
   They need order-book depth or tick data, which Yahoo does not provide. Enabling them
   needs a broker feed such as the Zerodha Kite websocket (kiteconnect is not installed).
-- VPIN (14): ON, intraday, from 1-minute bars.
+- VPIN (14): OBSERVE mode (`vpin_gate="observe"`) since 2026-09-28. It is computed and
+  logged but does not block buys. It has never been validated in a backtest, and in the
+  2026-09-25 replay it held back 10 of 50 stocks all session. Switch it to `"block"` only
+  after a pre-registered test on the Angel minute history shows it helps.
 - Not used in v2 decisions: copula (13), signatures (17), PINN pricers, HJB quoter (22),
   and the Phase 25 transpiler (no g++).
 

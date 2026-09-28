@@ -150,6 +150,11 @@ class Config:
     vpin_buckets_per_day: int = 50
     vpin_window_buckets: int = 50
     toxicity_threshold: float = 0.90       # percentile vs the stock's own recent days
+    # "block" holds back buys when toxicity > threshold; "observe" only logs what it
+    # would have done. Observe until validated: VPIN is not in any backtest (no minute
+    # history until 2026-09-28), and in the 2026-09-25 replay it blocked 10 of 50 stocks
+    # for the whole session (the book stayed ~80% invested instead of 100%).
+    vpin_gate: str = "observe"
 
     # ---- transfer entropy diagnostics (Phase 24) -----------------------------------
     te_bins: int = 6

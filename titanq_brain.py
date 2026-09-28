@@ -584,8 +584,10 @@ class Rebalancer:
                     continue
                 tox = toxicity.get(s)
                 if tox is not None and tox > cfg.toxicity_threshold:
-                    notes.append(f"{s}: buy of {diff} held back (VPIN toxicity {tox:.2f})")
-                    continue
+                    if cfg.vpin_gate == "block":
+                        notes.append(f"{s}: buy of {diff} held back (VPIN toxicity {tox:.2f})")
+                        continue
+                    notes.append(f"{s}: VPIN toxicity {tox:.2f} (observe mode: would hold back, buying)")
                 buys.append(PlannedOrder(s, "BUY", diff, px, "build to target", False))
 
         # cash check: sells first, and buys only what the cash (after sells) covers
@@ -633,10 +635,14 @@ def _test_rebalancer_rules() -> None:
     # dropped from target -> full exit even though small, and even if toxic
     orders, _ = rb2.plan({}, {"C": 3}, prices, 0, 150, now, {"C": 0.99})
     assert [(o.symbol, o.side, o.qty, o.reduce_only) for o in orders] == [("C", "SELL", 3, True)]
-    # toxic flow blocks buys
-    rb3 = Rebalancer(cfg)
+    # toxic flow blocks buys in "block" mode; in "observe" mode it only notes it
+    import dataclasses
+    rb3 = Rebalancer(dataclasses.replace(cfg, vpin_gate="block"))
     orders, notes = rb3.plan({"A": 0.2}, {}, prices, 500_000, 500_000, now, {"A": 0.95})
     assert orders == [] and "toxicity" in notes[0]
+    orders, notes = Rebalancer(dataclasses.replace(cfg, vpin_gate="observe")).plan(
+        {"A": 0.2}, {}, prices, 500_000, 500_000, now, {"A": 0.95})
+    assert [o.side for o in orders] == ["BUY"] and "observe" in notes[0]
     # no new risk in the last minutes
     late = datetime(2026, 9, 25, 15, 25, tzinfo=IST)
     orders, notes = Rebalancer(cfg).plan({"A": 0.2}, {}, prices, 500_000, 500_000, late, {})
