@@ -1,0 +1,66 @@
+{
+  "development": {
+    "primary": {
+      "events": 52,
+      "stocks": 18,
+      "months": 27,
+      "mean_excess": -0.03694911367203227,
+      "median_excess": -0.044206819876918886,
+      "month_t": -0.936811378913523,
+      "hit_rate": 0.4230769230769231,
+      "neg_rate": 0.5769230769230769
+    },
+    "invocations, 20 days": {
+      "events": 52,
+      "stocks": 18,
+      "months": 27,
+      "mean_excess": 0.00317941528996765,
+      "median_excess": -0.024348369131943378,
+      "month_t": -0.161196225628113,
+      "hit_rate": 0.4230769230769231,
+      "neg_rate": 0.5769230769230769
+    },
+    "invocations, 120 days": {
+      "events": 52,
+      "stocks": 18,
+      "months": 27,
+      "mean_excess": -0.04688644718297898,
+      "median_excess": -0.025009985439800483,
+      "month_t": -0.3041215992206558,
+      "hit_rate": 0.4423076923076923,
+      "neg_rate": 0.5576923076923077
+    },
+    "invocations, any person category": {
+      "events": 290,
+      "stocks": 33,
+      "months": 50,
+      "mean_excess": -0.02104545453541638,
+      "median_excess": 0.0017329873548774175,
+      "month_t": -0.6491029479501731,
+      "hit_rate": 0.506896551724138,
+      "neg_rate": 0.49310344827586206
+    },
+    "new promoter pledges": {
+      "events": 1521,
+      "stocks": 66,
+      "months": 51,
+      "mean_excess": 0.011634569656575949,
+      "median_excess": -0.018427002915298182,
+      "month_t": 1.7097550963815593,
+      "hit_rate": 0.4444444444444444,
+      "neg_rate": 0.5555555555555556
+    },
+    "promoter pledge releases": {
+      "events": 1313,
+      "stocks": 66,
+      "months": 51,
+      "mean_excess": 0.037174944594453224,
+      "median_excess": -0.004359218941696684,
+      "month_t": 1.885009498145053,
+      "hit_rate": 0.4859101294744859,
+      "neg_rate": 0.5140898705255141
+    }
+  },
+  "qualifies": false,
+  "test_revealed": false
+}

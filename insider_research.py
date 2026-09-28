@@ -165,7 +165,7 @@ class Returns:
         return self.filled.iloc[a + h][stocks] / self.px.iloc[a][stocks] - 1.0
 
 
-def measure(ev: pd.DataFrame, R: Returns, lo: str, hi: str, h: int) -> pd.DataFrame:
+def measure(ev: pd.DataFrame, R: Returns, lo: str, hi: str, h: int, cost: float = COST) -> pd.DataFrame:
     days = R.px.index
     out = []
     for e in ev.itertuples():
@@ -182,7 +182,7 @@ def measure(ev: pd.DataFrame, R: Returns, lo: str, hi: str, h: int) -> pd.DataFr
         if not np.isfinite(rs) or not np.isfinite(bench):
             continue
         out.append({"stock": e.yahoo, "entry": d.date(), "month": str(d.to_period("M")),
-                    "value": e.value, "excess": rs - bench - COST})
+                    "value": e.value, "excess": rs - bench - cost})
     return pd.DataFrame(out)
 
 
