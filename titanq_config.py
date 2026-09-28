@@ -53,6 +53,16 @@ UNIVERSE: Tuple[str, ...] = (
 )
 
 
+# Macro and market-context series (Yahoo daily, 12 years available; checked 2026-09-28).
+# NSE sector indices other than Bank/IT/Pharma are not on Yahoo; they come from Angel
+# (angel_history.py --daily-indices).
+MACRO_SYMBOLS: Tuple[str, ...] = (
+    "^INDIAVIX", "^NSEBANK", "^CNXIT", "^CNXPHARMA", "^NSEMDCP50", "^CRSLDX",
+    "USDINR=X", "BZ=F", "CL=F", "GC=F", "SI=F",
+    "^GSPC", "^IXIC", "^DJI", "^VIX", "^TNX", "DX-Y.NYB",
+    "^N225", "^HSI", "000001.SS", "^KS11", "^FTSE", "^GDAXI",
+)
+
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
