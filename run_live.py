@@ -35,7 +35,26 @@ MAX_RESTARTS = 12
 log = logging.getLogger("supervisor")
 
 
+def keep_awake(on: bool) -> None:
+    """Ask Windows not to sleep while the session runs. When a scheduled task wakes a
+    Modern Standby laptop, Windows puts it back to sleep after ~2 minutes of no user
+    activity unless a program requests the system stay on. Released on exit."""
+    if os.name != "nt":
+        return
+    import ctypes
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+    ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0))
+
+
 def main() -> None:
+    keep_awake(True)
+    try:
+        _supervise()
+    finally:
+        keep_awake(False)
+
+
+def _supervise() -> None:
     session = Session()
     restarts = 0
     while True:

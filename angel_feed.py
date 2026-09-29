@@ -468,6 +468,9 @@ def cmd_record(until: Optional[str] = None) -> None:
     last_report, last_rows = time.time(), 0
     last_growth, rows_seen = time.time(), 0
     last_latest = 0.0
+    if os.name == "nt":                     # keep a woken laptop awake until the recording ends
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
     try:
         while now_ist() < end:
             time.sleep(2.0)
@@ -501,6 +504,9 @@ def cmd_record(until: Optional[str] = None) -> None:
     finally:
         stream.stop()
         rec.maybe_flush(force=True)
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)      # allow sleep again
         day = now_ist().strftime("%Y-%m-%d")
         out = copy_session_to_archive(day)
         log.info("session %s: %d rows, %d files, %.1f MB; archive: %s", day, rec.rows_total,
