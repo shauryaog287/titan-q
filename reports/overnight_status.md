@@ -87,3 +87,20 @@
 - **During market hours:** nothing heavy runs. The downloader sleeps, and the research
   chain waits for the marker.
 - **Pushed:** the commits that were held back overnight are on GitHub.
+
+## 2026-09-29, 09:30 IST: live-start check
+
+- **Scheduled start:** worked. The task ran at 09:10 with result 0, which also confirms the
+  `pause` fix. The trading loop, the Angel recorder and the dashboard are all running.
+- **Angel recorder:** logged in through the VPN and receiving the whole market: 2,702
+  stocks on 3 connections, about 370 rows a second, about 1.7 MB a minute on disk.
+- **Dashboard:** serves on http://127.0.0.1:5000.
+- **Bug, fixed in code (commit 9e62d09):**
+  - The day's plan had 0% exposure ("Kelly f nan"). Yahoo has no 2026-09-28 bar for 7
+    of the 50 stocks (HCLTECH, ULTRACEMCO, NESTLEIND, CIPLA, APOLLOHOSP, UPL, SBILIFE).
+  - The sizing used the last row's close, which was NaN, and `max(0, nan)` silently
+    returned 0.
+  - It now uses the last known close, and a NaN sizing is logged as an explicit reason
+    instead of hiding.
+  - Rebuilt for today, the plan is 100% invested in all 50 (inverse volatility).
+  - The running loop still has this morning's plan: it must be restarted to trade today.
