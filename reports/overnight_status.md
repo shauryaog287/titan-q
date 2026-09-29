@@ -53,3 +53,22 @@
 - Still pending from earlier:
   - change the Angel MPIN and reset TOTP, then update `angel_credentials.json` yourself;
   - optionally delete `G:\My Drive\NSE_Data_Lake` (the old synthetic files).
+
+## 2026-09-28, 22:50 IST: update
+
+- **Network:** the Wi-Fi "Mayo Students-M" intercepts HTTPS to Yahoo Finance, Angel One and
+  NSE, and blocks GitHub. It started intermittently at 20:57. All downloads are stalled until
+  the laptop is on another network (phone hotspot or home Wi-Fi). Tomorrow's 09:10 paper
+  trading needs that too. Never install the network's certificate, and never click through
+  certificate warnings.
+- **Downloader:** rewritten to stay under Angel's ~5,000 requests an hour and to wait out
+  network failures. The running copy is the older version. Stop it once on a good network
+  (`Stop-Process -Id 34424,22576 -Force`), and it will be restarted with the new code.
+- **M1 and VPIN:** they will not run until the research set is at least 99.5% complete.
+- **INS1 (insider buys):** passed development (+2.28%) but failed its test (-1.42%). Not used.
+- **INS2 (pledge invocations):** did not qualify in development (52 events, t -0.94).
+- **Disclosure radar (`disclosure_radar.py`):** built and scheduled weekdays at 19:45. Its
+  first full run is pending a working network.
+- **Next studies:** delivery % and retail-frenzy reversal (DEL1), commodity-linked stocks,
+  sector momentum (PSU and defence), intraday patterns, F&O participant positioning, order wins.
+- **One commit is not pushed yet** (GitHub is blocked on this network).
