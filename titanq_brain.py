@@ -412,7 +412,10 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
     for s in sel:
         v = daily[s][daily[s].index < pd.Timestamp(asof)].iloc[-20:]
         ctx.adv_shares[s] = float(v["Volume"].median())
-    adv_notional = float(sum(w[i] * ctx.adv_shares[s] * closes[s].iloc[-1] for i, s in enumerate(sel)))
+    # last known price, not the last row: Yahoo sometimes lacks a stock's latest day
+    # (2026-09-28 was missing for 7 of the 50), and a NaN here made Kelly NaN -> 0% exposure
+    last_px = closes[sel].ffill().iloc[-1]
+    adv_notional = float(np.nansum([w[i] * ctx.adv_shares[s] * last_px[s] for i, s in enumerate(sel)]))
 
     # Phase 4
     from fusion_and_sizing import CostModel, KellySizer
@@ -429,6 +432,11 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
                     sample_years=ctx.market_span_years, equity=equity, adv_notional=adv_notional,
                     daily_vol=ctx.basket_sigma / math.sqrt(TRADING_DAYS), cost_model=costs)
     ctx.kelly_f, ctx.kelly_binding = kr.f_final, kr.binding_constraint
+    if not math.isfinite(ctx.kelly_f):
+        # never let a NaN pass silently (max(0, nan) is 0 in Python): say why the book is flat
+        ctx.reasons.append(f"Kelly sizing is not a number (mu_net {kr.mu_net}, adv_notional "
+                           f"{adv_notional:.0f}, sizing sigma {ctx.sizing_sigma:.4f}); exposure set to 0")
+        ctx.kelly_f, ctx.kelly_binding = 0.0, "invalid_input"
     ctx.kelly_detail = {"f_naive": round(kr.f_naive, 4), "f_shrunk": round(kr.f_shrunk, 4),
                         "mu_posterior": round(kr.mu_posterior, 5), "mu_net": round(kr.mu_net, 5),
                         "se_mu": round(kr.se_mu, 4)}
