@@ -217,6 +217,32 @@ def flags(got: Dict[str, object]):
     return f, ticker
 
 
+def latest_flags(max_age_days: int = 7):
+    """(date, symbol -> red flags) from the newest collected day, or (None, {}).
+    Used by the trading loop in observe mode: the flags are logged, never traded on."""
+    if not os.path.isdir(DAILY_DIR):
+        return None, {}
+    days = sorted(d for d in os.listdir(DAILY_DIR) if os.path.exists(os.path.join(DAILY_DIR, d, "asm.json")))
+    if not days or (now_ist().date() - date.fromisoformat(days[-1])).days > max_age_days:
+        return None, {}
+    folder = os.path.join(DAILY_DIR, days[-1])
+
+    def load(name, default):
+        p = os.path.join(folder, name)
+        if not os.path.exists(p):
+            return default
+        with open(p, encoding="ascii") as fh:
+            return json.load(fh)
+
+    asm = load("asm.json", {})
+    got = {"asm": [dict(r, list=k) for k in ("longterm", "shortterm") for r in _rows(asm.get(k, {}))],
+           "gsm": _rows(load("gsm.json", [])),
+           "announcements": _rows(load("announcements.json", [])) + _rows(load("announcements_prev_day.json", [])),
+           "pledges": []}                   # pledges are keyed by company name, not symbol
+    f, _ = flags(got)
+    return date.fromisoformat(days[-1]), f
+
+
 def write_watchlist(day: date, got: Dict[str, object], tradable: Set[str]) -> str:
     f, pledged = flags(got)
     live = {s[:-3] for s in UNIVERSE}

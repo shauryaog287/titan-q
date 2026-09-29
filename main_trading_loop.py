@@ -129,6 +129,28 @@ def write_json_atomic(path: str, obj: Dict) -> None:
     os.replace(tmp, path)
 
 
+def radar_overlay(ctx: DailyContext) -> Dict[str, List[str]]:
+    """Public-disclosure red flags (disclosure_radar.py) for the stocks in today's plan.
+    OBSERVE mode: logged and shown on the dashboard, never used to change a trade. No flag
+    has passed a pre-registered test yet (INS1 insider buys failed its test; INS2 pledge
+    invocations did not qualify); a flag gets a say only after one does."""
+    try:
+        from disclosure_radar import latest_flags
+        day, flags = latest_flags()
+    except Exception as exc:
+        log.warning("[RADAR] not available: %s", exc)
+        return {}
+    if day is None:
+        log.info("[RADAR] no recent disclosure data collected (disclosure_radar.py runs 19:45 weekdays)")
+        return {}
+    hits = {s: flags[s[:-3]] for s in ctx.target_weights if s[:-3] in flags}
+    log.info("[RADAR] disclosures of %s: %d of %d stocks in the plan flagged (observe mode, no effect "
+             "on trades)", day, len(hits), len(ctx.target_weights))
+    for s, reasons in sorted(hits.items()):
+        log.info("[RADAR] %s: %s", s, "; ".join(reasons)[:300])
+    return hits
+
+
 class Orchestrator:
     def __init__(self, mode: str, feed, broker: PaperTradingBroker, engine: ExecutionEngine,
                  store: DailyStore, session: Session) -> None:
@@ -165,6 +187,9 @@ class Orchestrator:
             log.info("[COMPONENT] %-20s %s", name, st)
         for r in self.ctx.reasons:
             log.warning("[CONTEXT] %s", r)
+        self.radar = radar_overlay(self.ctx)
+
+    radar: Dict[str, List[str]] = {}
 
     def _adv(self, symbol: str) -> Optional[float]:
         if self.ctx and symbol in self.ctx.adv_shares:
@@ -251,6 +276,7 @@ class Orchestrator:
             "target_weights": ctx.target_weights if ctx else {},
             "toxicity_by_symbol": self.toxicity, "vpin_by_symbol": self.vpin,
             "components": ctx.components if ctx else {},
+            "radar_flags_observe_only": self.radar,
             "notes": self.notes,
         }
         try:
