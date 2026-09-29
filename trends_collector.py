@@ -37,7 +37,8 @@ log = logging.getLogger("trends")
 
 TRENDS_DIR = os.path.join(DATA_DIR, "trends")
 DRIVE_DIR = r"G:\My Drive\Titan-Q_History\trends"
-GAP_SECONDS = 10.0
+GAP_SECONDS = 30.0          # Google answered 429 after ~13 requests 10 s apart (2026-09-29)
+BACKOFF = (120.0, 300.0, 600.0)
 SPIKE_RATIO = 2.0
 
 
@@ -57,9 +58,9 @@ def search_terms(symbols: List[str]) -> Dict[str, str]:
 def fetch(terms: Dict[str, str]) -> pd.DataFrame:
     from pytrends.request import TrendReq
     t = TrendReq(hl="en-IN", tz=-330, timeout=(10, 30))
-    rows, backoff = [], 60.0
+    rows = []
     for i, (sym, term) in enumerate(sorted(terms.items())):
-        for attempt in range(3):
+        for attempt in range(len(BACKOFF) + 1):
             try:
                 t.build_payload([term], timeframe="today 3-m", geo="IN")
                 df = t.interest_over_time()
@@ -68,9 +69,13 @@ def fetch(terms: Dict[str, str]) -> pd.DataFrame:
                         rows.append({"symbol": sym, "term": term, "date": pd.Timestamp(d).date(), "value": int(v)})
                 break
             except Exception as exc:
-                log.warning("%s: %s (attempt %d); waiting %.0f s", term, type(exc).__name__, attempt + 1, backoff)
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 600.0)
+                if attempt == len(BACKOFF):
+                    log.warning("Google keeps refusing (%s); stopping with %d of %d terms",
+                                type(exc).__name__, i, len(terms))
+                    return pd.DataFrame(rows)
+                log.warning("%s: %s (attempt %d); waiting %.0f s", term, type(exc).__name__, attempt + 1,
+                            BACKOFF[attempt])
+                time.sleep(BACKOFF[attempt])
         time.sleep(GAP_SECONDS)
         if (i + 1) % 20 == 0:
             log.info("%d/%d terms", i + 1, len(terms))
