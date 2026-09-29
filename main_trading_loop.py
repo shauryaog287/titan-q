@@ -194,8 +194,9 @@ def news_overlay(symbols) -> Dict[str, Dict]:
     neg = {s: v for s, v in summ.items() if v["worst_score"] <= STRONG_NEGATIVE}
     log.info("[NEWS] last 24 h: %d of %d stocks in the plan have news, %d with a strongly negative "
              "headline (observe mode, no effect on trades)", len(summ), len(symbols), len(neg))
-    for s, v in sorted(neg.items(), key=lambda kv: kv[1]["worst_score"]):
-        log.info("[NEWS] %s %+.2f: %s", s, v["worst_score"], v["worst_title"][:150])
+    for s, v in sorted(neg.items(), key=lambda kv: kv[1]["agg_score"]):
+        log.info("[NEWS] %s aggregated %+.2f (confidence %.2f, %d stories); worst %+.2f: %s", s,
+                 v["agg_score"], v["confidence"], v["stories"], v["worst_score"], v["worst_title"][:130])
     return summ
 
 

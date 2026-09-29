@@ -314,30 +314,66 @@ def collect() -> int:
 # SUMMARY (used by the trading loop in observe mode, and by --report)
 # ===========================================================================
 
+# Aggregation settings (fusion_and_sizing.SentimentAggregator). NOT fitted yet: the half-life
+# and prior strength are reasonable defaults until the historical news test fits them.
+AGG_HALF_LIFE_HOURS = 12.0
+AGG_PRIOR_STRENGTH = 3.0
+AGG_LOOKBACK_HOURS = 48.0
+
+
+def _utc(ts) -> pd.Timestamp:
+    t = pd.Timestamp(ts)
+    return t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
+
+
 def symbol_summary(symbols: Sequence[str], hours: float = 24.0) -> Dict[str, Dict]:
-    """symbol -> {n, mean score, most negative headline} for the last `hours`."""
-    df = load_news(hours)
+    """symbol -> headline count, simple mean, the most negative headline, and the aggregated
+    sentiment (SentimentAggregator: syndicated copies merged, older news decayed, a headline
+    naming k stocks counts 1/k for each, and few headlines shrunk toward neutral)."""
+    from fusion_and_sizing import Article, SentimentAggregator
+    df = load_news(max(hours, AGG_LOOKBACK_HOURS))
     out: Dict[str, Dict] = {}
     if not len(df):
         return out
     df = df[df["symbols"].fillna("") != ""]
     want = set(symbols)
-    rows = [(s, r) for r in df.itertuples() for s in str(r.symbols).split(",") if s in want]
-    for s in {s for s, _ in rows}:
-        mine = [r for sym, r in rows if sym == s]
-        worst = min(mine, key=lambda r: r.score)
-        out[s] = {"n": len(mine), "mean_score": round(sum(r.score for r in mine) / len(mine), 3),
-                  "worst_score": round(float(worst.score), 3), "worst_title": worst.title[:160]}
+    now = _utc(now_ist())
+    recent_cut = now - pd.Timedelta(hours=hours)
+    agg = SentimentAggregator(half_life_bars=AGG_HALF_LIFE_HOURS, prior_strength=AGG_PRIOR_STRENGTH,
+                              lookback_bars=AGG_LOOKBACK_HOURS, default_quality=1.0)
+    by_sym: Dict[str, List] = {}
+    for r in df.itertuples():
+        syms = [s for s in str(r.symbols).split(",") if s]
+        for s in syms:
+            if s in want:
+                by_sym.setdefault(s, []).append((r, len(syms)))
+    for s, rows in by_sym.items():
+        arts = []
+        for r, k in rows:
+            seen = _utc(r.first_seen)
+            pub = min(_utc(r.published.rstrip("Z")) if r.published else seen, seen)
+            arts.append(Article(article_id=r.key, body=r.title, published_ts=pub, available_ts=seen,
+                                finbert_score=float(r.score), source=r.source, entity_salience=1.0 / k))
+        snap = agg.aggregate(arts, now, bar_seconds=3600.0)
+        recent = [r for r, _ in rows if _utc(r.first_seen) >= recent_cut]
+        if not recent:
+            continue
+        worst = min(recent, key=lambda r: r.score)
+        out[s] = {"n": len(recent), "mean_score": round(sum(r.score for r in recent) / len(recent), 3),
+                  "worst_score": round(float(worst.score), 3), "worst_title": worst.title[:160],
+                  "agg_score": round(snap.score, 3), "confidence": round(snap.confidence, 2),
+                  "stories": snap.n_clusters, "hours_since": round(snap.bars_since_news, 1)}
     return out
 
 
 def report() -> None:
     summ = symbol_summary(focus_symbols())
-    print(f"News tone, last 24 h, stocks we hold or plan ({len(summ)} with news):")
-    for s, v in sorted(summ.items(), key=lambda kv: kv[1]["mean_score"]):
-        flag = "  <-- strongly negative" if v["worst_score"] <= STRONG_NEGATIVE else ""
-        print(f"  {s:12s} n={v['n']:3d} mean {v['mean_score']:+.2f} | worst {v['worst_score']:+.2f}: "
-              f"{v['worst_title'][:90]}{flag}")
+    print(f"News tone, last 24 h, stocks we hold or plan ({len(summ)} with news); "
+          "agg = aggregated (decayed, deduplicated, shrunk):")
+    for s, v in sorted(summ.items(), key=lambda kv: kv[1]["agg_score"]):
+        flag = "  <-- strongly negative headline" if v["worst_score"] <= STRONG_NEGATIVE else ""
+        print(f"  {s:12s} agg {v['agg_score']:+.2f} (conf {v['confidence']:.2f}, {v['stories']} stories) "
+              f"| worst {v['worst_score']:+.2f}: {v['worst_title'][:80]}{flag}")
 
 
 if __name__ == "__main__":
