@@ -36,3 +36,4 @@ forward_test.lock
 reports/radar/
 restart_trading_loop.request
 alerts_config.json
+!reddit_credentials.example.json

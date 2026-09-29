@@ -200,6 +200,38 @@ def news_overlay(symbols) -> Dict[str, Dict]:
     return summ
 
 
+def attention_overlay(symbols) -> Dict[str, Dict]:
+    """Retail attention for the plan's stocks: Google Trends search spikes and Reddit
+    mentions. OBSERVE mode, like news and the radar: logged and exported only."""
+    out: Dict[str, Dict] = {}
+    names = [s[:-3] for s in symbols]
+    try:
+        from trends_collector import SPIKE_RATIO, attention
+        att = attention()
+        spikes = {s: v for s, v in att.items() if s in names and v["ratio"] >= SPIKE_RATIO}
+        log.info("[ATTENTION] Google Trends: %d of %d stocks with data, %d search spikes (>= x%.1f; observe "
+                 "mode)", len([s for s in names if s in att]), len(names), len(spikes), SPIKE_RATIO)
+        for s, v in sorted(spikes.items(), key=lambda kv: -kv[1]["ratio"]):
+            log.info("[ATTENTION] %s searches x%.2f vs usual", s, v["ratio"])
+        for s in names:
+            if s in att:
+                out.setdefault(s, {})["search_ratio"] = att[s]["ratio"]
+    except Exception as exc:
+        log.warning("[ATTENTION] Trends not available: %s", exc)
+    try:
+        from reddit_collector import mentions
+        m = mentions()
+        for s in names:
+            if s in m:
+                out.setdefault(s, {}).update({"reddit_mentions": m[s]["n"], "reddit_tone": m[s]["tone"]})
+        if m:
+            top = sorted(((s, v) for s, v in m.items() if s in names), key=lambda kv: -kv[1]["n"])[:5]
+            log.info("[ATTENTION] Reddit, last 24 h: %s", ", ".join(f"{s} {v['n']}" for s, v in top) or "none")
+    except Exception as exc:
+        log.warning("[ATTENTION] Reddit not available: %s", exc)
+    return out
+
+
 class Orchestrator:
     def __init__(self, mode: str, feed, broker: PaperTradingBroker, engine: ExecutionEngine,
                  store: DailyStore, session: Session) -> None:
@@ -243,6 +275,7 @@ class Orchestrator:
         self.radar = radar_overlay(self.ctx)
         self.news = news_overlay(list(self.ctx.target_weights))
         self._news_at = self.feed.now()
+        self.attention = attention_overlay(list(self.ctx.target_weights))
         if self.context_degraded():
             alert(self.mode, "plan not valid", "Today's plan cannot trade: " + "; ".join(self.ctx.reasons)[:300]
                   + ". It is rebuilt every 10 minutes.", "high", "warning", repeat_minutes=60)
@@ -253,6 +286,7 @@ class Orchestrator:
 
     radar: Dict[str, List[str]] = {}
     news: Dict[str, Dict] = {}
+    attention: Dict[str, Dict] = {}
     _news_at: Optional[datetime] = None
 
     def _adv(self, symbol: str) -> Optional[float]:
@@ -363,6 +397,7 @@ class Orchestrator:
             "halted_daily_loss_limit": self.halted,
             "radar_flags_observe_only": self.radar,
             "news_observe_only": self.news,
+            "attention_observe_only": self.attention,
             "notes": self.notes,
         }
         try:

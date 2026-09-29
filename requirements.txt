@@ -26,3 +26,8 @@ PyOTP==2.10.0
 websocket-client==1.9.2
 logzero==1.7.0
 certifi==2026.7.22
+
+# retail attention and social (2026-09-29)
+pytrends==4.9.2
+praw==8.0.3
+prawcore==4.0.0
