@@ -146,6 +146,13 @@ def update(force: bool = False) -> None:
                                 clock_fn=lambda: datetime.combine(day, dtime(15, 30), IST),
                                 state_file=ACCOUNT_FILE)
     fees_before = broker.fees_paid
+    # book splits/bonuses/dividends on holdings, and refuse fills at a circuit limit (a stock
+    # closing at its upper band cannot be bought at that close); added 2026-09-29
+    from corporate_actions import apply_to_account, circuit_limits, load_bands
+    for m in apply_to_account(broker):
+        log.info("%s", m)
+    prev = px.iloc[i - 1].drop(labels=[INDEX_SYMBOL]).dropna()
+    broker.limits_fn = circuit_limits(prev.to_dict(), load_bands()).get
     first_run = not state["formations"]
     new_month = px.index[i].month != px.index[i - 1].month
     trades = 0

@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import tempfile
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from titanq_config import CONFIG, Config, PROJECT_DIR
 from market_data import IST
@@ -70,6 +71,11 @@ class PaperTradingBroker:
         # Set to ExecutionEngine.on_fill so the engine's position ledger sees our fills.
         # Without it the engine's reconciler finds a mismatch and halts all trading.
         self.fill_callback: Optional[Callable[[str, int, float], None]] = None
+        # symbol -> (lower, upper) circuit limits for today, or None (no band). A buy at the
+        # upper limit or a sell at the lower one cannot fill on NSE, so it is rejected here.
+        self.limits_fn: Optional[Callable[[str], Optional[Tuple[float, float]]]] = None
+        self.ca_applied: List[str] = []               # corporate actions already booked
+        self.dividends_received = 0.0
         self.state_file = state_file
         if state_file and os.path.exists(state_file):
             self._load()
@@ -87,6 +93,8 @@ class PaperTradingBroker:
         self.fees_paid = float(s.get("fees_paid", 0.0))
         self.trade_history = list(s.get("trades", []))
         self._seq = int(s.get("seq", len(self.trade_history)))
+        self.ca_applied = list(s.get("ca_applied", []))
+        self.dividends_received = float(s.get("dividends_received", 0.0))
         log.info("paper account loaded from %s: cash Rs. %s, %d positions",
                  self.state_file, f"{self.capital:,.2f}", len(self.positions))
 
@@ -98,8 +106,55 @@ class PaperTradingBroker:
             "positions": self.positions, "avg_cost": self.avg_cost,
             "realised_pnl": self.realised_pnl, "fees_paid": self.fees_paid,
             "trades": self.trade_history[-1000:], "seq": self._seq,
+            "ca_applied": self.ca_applied[-2000:], "dividends_received": self.dividends_received,
             "updated": datetime.now(IST).isoformat(timespec="seconds"),
         })
+
+    # ---- corporate actions -------------------------------------------------------
+
+    def held_since(self, symbol: str) -> Optional[str]:
+        """Date (YYYY-MM-DD) of the buy that opened the current position, from the ledger."""
+        if symbol not in self.positions:
+            return None
+        q, since = 0, None
+        for t in self.trade_history:
+            if t["ticker"] != symbol:
+                continue
+            if q == 0 and t["side"] == "BUY":
+                since = t["time"][:10]
+            q += t["qty"] if t["side"] == "BUY" else -t["qty"]
+        return since
+
+    def apply_corporate_action(self, symbol: str, ex_date: str, kind: str, value: float) -> Optional[str]:
+        """Book a split/bonus (kind "split", value = new shares per old share, as Yahoo
+        reports it: 5.0 for a 1:5 split, 2.0 for a 1:1 bonus) or a cash dividend (kind
+        "dividend", value = Rs. per share) on a position held before the ex-date. Each
+        action is booked once. Returns a description, or None if it does not apply."""
+        key = f"{symbol}|{ex_date}|{kind}|{value:g}"
+        since = self.held_since(symbol)
+        if key in self.ca_applied or since is None or not since < ex_date or value <= 0:
+            return None
+        q = self.positions[symbol]
+        if kind == "split":
+            new_q = int(math.floor(q * value + 1e-9))
+            frac = q * value - new_q                       # cash in lieu of fractional shares
+            cost = q * self.avg_cost.get(symbol, 0.0)
+            px = self._price(symbol) or (self.avg_cost.get(symbol, 0.0) / value)
+            self.positions[symbol] = new_q
+            self.avg_cost[symbol] = cost / (q * value) if q * value > 0 else 0.0
+            self.capital += frac * px
+            msg = f"{symbol}: split/bonus x{value:g} ex {ex_date}: {q} -> {new_q} shares"
+        elif kind == "dividend":
+            cash = q * value
+            self.capital += cash
+            self.dividends_received += cash
+            msg = f"{symbol}: dividend Rs. {value:g}/share ex {ex_date} on {q} shares = Rs. {cash:,.2f}"
+        else:
+            return None
+        self.ca_applied.append(key)
+        log.info("[CORPORATE ACTION] %s", msg)
+        self.save()
+        return msg
 
     # ---- costs and valuation ------------------------------------------------------
 
@@ -180,6 +235,13 @@ class PaperTradingBroker:
         px = self._price(symbol)
         if px is None:
             raise PaperOrderRejected(f"{symbol}: no price from the feed")
+        lim = self.limits_fn(symbol) if self.limits_fn is not None else None
+        if lim:
+            lo, hi = lim
+            if side == "BUY" and px >= hi * (1 - 1e-4):
+                raise PaperOrderRejected(f"{symbol}: at the upper circuit (Rs. {hi:,.2f}); no sellers")
+            if side == "SELL" and px <= lo * (1 + 1e-4):
+                raise PaperOrderRejected(f"{symbol}: at the lower circuit (Rs. {lo:,.2f}); no buyers")
         slip = self.cfg.slippage_bps / 1e4
         fill = px * (1 + slip) if side == "BUY" else px * (1 - slip)
         value = fill * qty

@@ -47,6 +47,8 @@ import tempfile
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
+import pandas as pd
+
 from titanq_config import CONFIG, INDEX_SYMBOL, LOGS_DIR, PROJECT_DIR, STATE_FILE, UNIVERSE
 from market_data import ALL_SYMBOLS, IST, DailyStore, LiveBarFeed, ReplayFeed, Session, now_ist
 from titanq_brain import (DailyContext, Rebalancer, ToxicityMonitor, build_daily_context,
@@ -198,6 +200,7 @@ class Orchestrator:
     async def build_context(self) -> None:
         log.info("[CONTEXT] building for session %s ...", self.feed.session_date)
         self.daily = await asyncio.to_thread(self.store.load, ALL_SYMBOLS, self.mode == "live")
+        await asyncio.to_thread(self.prepare_account)
         self.ctx = await asyncio.to_thread(build_daily_context, self.daily, self.feed.session_date,
                                            self.broker.equity(), holdings=sorted(self.broker.positions))
         save_context(self.ctx)
@@ -309,6 +312,24 @@ class Orchestrator:
             write_json_atomic(STATE_FILE, state)
         except Exception as exc:
             log.warning("dashboard export failed: %s", exc)
+
+    def prepare_account(self) -> None:
+        """Before planning: book splits/bonuses/dividends on held stocks (live only), and set
+        today's circuit limits from yesterday's closes and NSE's price bands."""
+        from corporate_actions import apply_to_account, circuit_limits, load_bands
+        if self.mode == "live" and self.broker.positions:
+            for m in apply_to_account(self.broker):
+                log.info("[ACCOUNT] %s", m)
+        try:
+            day = pd.Timestamp(self.feed.session_date)
+            prev = {s: float(df["Close"][df.index < day].dropna().iloc[-1])
+                    for s, df in self.daily.items() if len(df) and (df.index < day).any()}
+            limits = circuit_limits(prev, load_bands())
+            self.broker.limits_fn = limits.get
+            log.info("[ACCOUNT] circuit limits set for %d of %d stocks (the rest have no price band)",
+                     len(limits), len(prev))
+        except Exception as exc:
+            log.warning("[ACCOUNT] circuit limits not set: %s", exc)
 
     def context_degraded(self) -> bool:
         """An invalid plan (bad data, a failed model load) is retried, not kept all day."""
