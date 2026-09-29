@@ -104,3 +104,20 @@
     instead of hiding.
   - Rebuilt for today, the plan is 100% invested in all 50 (inverse volatility).
   - The running loop still has this morning's plan: it must be restarted to trade today.
+
+## 2026-09-29, 15:15 IST: what happened today
+
+- **Paper trading:** the loop kept this morning's 0% plan, because it was not restarted after
+  the fix. So there were no trades today. The fix (commit 9e62d09) applies automatically
+  from tomorrow's 09:10 start.
+- **Recorder:** it recorded the whole market from 09:10 to 14:32, 10.7 million rows and
+  about 740 MB.
+  - At 14:32 two of its three connections dropped, and the third at 15:04.
+  - The Angel library's own retries hit "429 Connection Limit Exceeded" and gave up.
+  - Result: about a third of the market was recorded from 14:32, and nothing from 15:04.
+- **Recorder fix (angel_feed.py):**
+  - Our own supervisor reconnects each connection with a fresh socket after a wait
+    (30 s, doubling to 5 min). The library's retries are off.
+  - A watchdog closes and reconnects any connection that is silent for 3 minutes.
+  - An offline self-test covers both.
+  - The fix applies from tomorrow.

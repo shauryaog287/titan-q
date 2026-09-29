@@ -291,29 +291,46 @@ def _verified_ws_class():
 class MarketStream:
     """Splits the token list across up to MAX_CONNECTIONS websocket connections
     (TOKENS_PER_CONNECTION each), subscribes in SnapQuote mode, and feeds every
-    packet to the recorder. Each connection runs in its own daemon thread."""
+    packet to the recorder.
+
+    Reconnection is ours, not the SDK's. On 2026-09-29 two connections dropped at
+    14:32 and the third at 15:04; the SDK's own retries reconnected while the old
+    sessions still counted, Angel answered "429 Connection Limit Exceeded", and its
+    retry counter (never reset during the day) then gave up for good. Now each
+    connection runs in a supervisor thread: connect (blocks until the connection
+    ends), wait (30 s, doubling to 5 min; reset after 5 min of good data), and
+    connect again with a fresh socket. `check_stalls` closes a connection that has
+    gone silent, so it too is reconnected."""
+
+    RECONNECT_FIRST, RECONNECT_MAX, HEALTHY_AFTER = 30.0, 300.0, 300.0
 
     def __init__(self, auth_token: str, api_key: str, client_code: str, feed_token: str,
-                 tokens: Sequence[str], recorder: TickRecorder) -> None:
+                 tokens: Sequence[str], recorder: TickRecorder, ws_class=None) -> None:
         self.recorder = recorder
+        self.creds = (auth_token, api_key, client_code, feed_token)
         cap = TOKENS_PER_CONNECTION * MAX_CONNECTIONS
         tokens = list(dict.fromkeys(tokens))
         if len(tokens) > cap:
             log.warning("%d tokens requested, capacity %d: keeping the first %d", len(tokens), cap, cap)
             tokens = tokens[:cap]
         chunks = [tokens[i:i + TOKENS_PER_CONNECTION] for i in range(0, len(tokens), TOKENS_PER_CONNECTION)]
-        WS = _verified_ws_class()
-        self.sockets = []
+        self.WS = ws_class or _verified_ws_class()
+        self.sockets = [(f"c{k}", chunk) for k, chunk in enumerate(chunks)]
+        self.current: Dict[str, object] = {}
+        self.last_data: Dict[str, float] = {}
+        self.reconnects: Dict[str, int] = {name: 0 for name, _ in self.sockets}
         self.errors: List[str] = []
-        for k, chunk in enumerate(chunks):
-            ws = WS(auth_token, api_key, client_code, feed_token, max_retry_attempt=5,
-                    retry_strategy=1, retry_delay=5)
-            name = f"c{k}"
-            ws.on_open = self._on_open(ws, name, chunk)
-            ws.on_data = self._on_data(name)
-            ws.on_error = self._on_error(name)
-            ws.on_close = lambda wsapp, n=name: log.warning("connection %s closed", n)
-            self.sockets.append((name, ws, chunk))
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+
+    def _make(self, name: str, chunk: List[str]):
+        # max_retry_attempt=0: on an error the SDK just closes, and the supervisor decides
+        ws = self.WS(*self.creds, max_retry_attempt=0)
+        ws.on_open = self._on_open(ws, name, chunk)
+        ws.on_data = self._on_data(name)
+        ws.on_error = self._on_error(name)
+        ws.on_close = lambda wsapp, n=name: log.warning("connection %s closed", n)
+        return ws
 
     def _on_open(self, ws, name, chunk):
         def f(wsapp):
@@ -325,6 +342,7 @@ class MarketStream:
 
     def _on_data(self, name):
         def f(wsapp, msg):
+            self.last_data[name] = time.time()
             row = normalise_snapquote(msg, time.time())
             if row is not None:
                 self.recorder.add(name, row)
@@ -333,19 +351,60 @@ class MarketStream:
     def _on_error(self, name):
         def f(*args):
             self.errors.append(f"{name}: {args}")
-            log.error("connection %s error: %s", name, args)
+            log.error("connection %s error: %s", name, str(args)[:300])
         return f
 
+    def _supervise(self, k: int, name: str, chunk: List[str]) -> None:
+        self._stop.wait(5.0 * k)                           # stagger the first connects
+        backoff = self.RECONNECT_FIRST
+        while not self._stop.is_set():
+            ws = self._make(name, chunk)
+            with self._lock:
+                self.current[name] = ws
+            t0 = time.time()
+            self.last_data[name] = t0
+            try:
+                ws.connect()                                # blocks until the connection ends
+            except Exception as exc:
+                log.error("connection %s failed: %s", name, str(exc)[:200])
+            if self._stop.is_set():
+                return
+            up = time.time() - t0
+            if up >= self.HEALTHY_AFTER:
+                backoff = self.RECONNECT_FIRST
+            self.reconnects[name] += 1
+            log.warning("connection %s ended after %.0f s; reconnecting in %.0f s (reconnect %d)",
+                        name, up, backoff, self.reconnects[name])
+            self._stop.wait(backoff)
+            backoff = min(backoff * 2, self.RECONNECT_MAX)
+
+    def check_stalls(self, max_silence: float = 180.0) -> None:
+        """Close any connection with no data for max_silence seconds (call in session)."""
+        now = time.time()
+        with self._lock:
+            for name, ws in self.current.items():
+                if now - self.last_data.get(name, now) > max_silence:
+                    log.warning("connection %s silent for %.0f s; closing it to reconnect",
+                                name, now - self.last_data[name])
+                    self.last_data[name] = now
+                    try:
+                        ws.close_connection()
+                    except Exception:
+                        pass
+
     def start(self) -> None:
-        for name, ws, _chunk in self.sockets:
-            threading.Thread(target=ws.connect, name=f"angel-{name}", daemon=True).start()
+        for k, (name, chunk) in enumerate(self.sockets):
+            threading.Thread(target=self._supervise, args=(k, name, chunk), name=f"angel-{name}",
+                             daemon=True).start()
 
     def stop(self) -> None:
-        for _name, ws, _chunk in self.sockets:
-            try:
-                ws.close_connection()
-            except Exception:
-                pass
+        self._stop.set()
+        with self._lock:
+            for ws in self.current.values():
+                try:
+                    ws.close_connection()
+                except Exception:
+                    pass
 
 
 # ===========================================================================
@@ -392,6 +451,8 @@ def cmd_record(until: Optional[str] = None) -> None:
         while now_ist() < end:
             time.sleep(2.0)
             rec.maybe_flush()
+            if session.is_open(now_ist()):
+                stream.check_stalls()
             if time.time() - last_report >= 60:
                 rate = (rec.rows_total - last_rows) / (time.time() - last_report)
                 log.info("rows %d (%.0f/s) | tokens seen %d | files %d | %.1f MB written",
@@ -464,6 +525,52 @@ def _test_recorder_roundtrip(tmp: str) -> None:
     print("[ok] recorder: rows flushed to zstd parquet, read back, packed into one archive file")
 
 
+def _test_stream_reconnects() -> None:
+    """Dropped connections come back with a fresh socket after a wait; a silent one is
+    closed by check_stalls; stop() ends every supervisor."""
+    made: List["Fake"] = []
+
+    class Fake:
+        def __init__(self, *creds, max_retry_attempt=1):
+            assert max_retry_attempt == 0                   # SDK retries must be off
+            self.closed = threading.Event()
+            self.drop = len(made) < 2                       # the first two drop at once
+            made.append(self)
+
+        def connect(self):
+            self.on_open(None)
+            self.on_data(None, {})
+            if not self.drop:
+                self.closed.wait(5.0)                       # a healthy connection stays up
+
+        def subscribe(self, *args):
+            pass
+
+        def close_connection(self):
+            self.closed.set()
+
+    class Quick(MarketStream):
+        RECONNECT_FIRST, RECONNECT_MAX = 0.05, 0.2
+
+    s = Quick("jwt", "key", "client", "feed", [str(i) for i in range(10)], TickRecorder(root="."), ws_class=Fake)
+    s.start()
+    deadline = time.time() + 3.0
+    while len(made) < 3 and time.time() < deadline:
+        time.sleep(0.01)
+    assert len(made) == 3 and s.reconnects["c0"] == 2, (len(made), s.reconnects)
+    time.sleep(0.05)
+    s.last_data["c0"] = time.time() - 999                   # silent for too long
+    s.check_stalls(max_silence=180.0)
+    deadline = time.time() + 3.0
+    while len(made) < 4 and time.time() < deadline:
+        time.sleep(0.01)
+    assert made[2].closed.is_set() and len(made) == 4, len(made)
+    s.stop()
+    assert all(f.closed.is_set() for f in made[3:])
+    print("[ok] stream: dropped connections reconnect after a wait with a fresh socket (SDK retries "
+          "off); a silent connection is closed and reconnected; stop() ends all")
+
+
 if __name__ == "__main__":
     import sys
     import tempfile
@@ -490,3 +597,4 @@ if __name__ == "__main__":
         _test_read_only_guard()
         with tempfile.TemporaryDirectory() as tmp:
             _test_recorder_roundtrip(tmp)
+        _test_stream_reconnects()
