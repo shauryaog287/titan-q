@@ -51,6 +51,7 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 |---|---|---|
 | TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop (under `run_live.py`), Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
 | TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
+| TitanQ_News | every 30 min, 07:30-21:30 daily | `news_analyser.py`: ET, Business Standard, Mint RSS plus Google News for held/planned stocks; FinBERT tone; `data/news/news_<date>.parquet` (first-seen times) copied to G:. Observe only. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
 `after_download.ps1` is a one-off detached chain, logged to `logs\after_download.log`.

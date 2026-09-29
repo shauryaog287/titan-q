@@ -151,6 +151,27 @@ def radar_overlay(ctx: DailyContext) -> Dict[str, List[str]]:
     return hits
 
 
+NEWS_REFRESH = timedelta(minutes=30)
+
+
+def news_overlay(symbols) -> Dict[str, Dict]:
+    """Headline tone (news_analyser.py, FinBERT) of the last 24 h for the given stocks.
+    OBSERVE mode like the radar: logged and exported, never used to change a trade, until
+    news tone passes a pre-registered test."""
+    try:
+        from news_analyser import STRONG_NEGATIVE, symbol_summary
+        summ = symbol_summary([s[:-3] for s in symbols])
+    except Exception as exc:
+        log.warning("[NEWS] not available: %s", exc)
+        return {}
+    neg = {s: v for s, v in summ.items() if v["worst_score"] <= STRONG_NEGATIVE}
+    log.info("[NEWS] last 24 h: %d of %d stocks in the plan have news, %d with a strongly negative "
+             "headline (observe mode, no effect on trades)", len(summ), len(symbols), len(neg))
+    for s, v in sorted(neg.items(), key=lambda kv: kv[1]["worst_score"]):
+        log.info("[NEWS] %s %+.2f: %s", s, v["worst_score"], v["worst_title"][:150])
+    return summ
+
+
 class Orchestrator:
     def __init__(self, mode: str, feed, broker: PaperTradingBroker, engine: ExecutionEngine,
                  store: DailyStore, session: Session) -> None:
@@ -188,8 +209,12 @@ class Orchestrator:
         for r in self.ctx.reasons:
             log.warning("[CONTEXT] %s", r)
         self.radar = radar_overlay(self.ctx)
+        self.news = news_overlay(list(self.ctx.target_weights))
+        self._news_at = self.feed.now()
 
     radar: Dict[str, List[str]] = {}
+    news: Dict[str, Dict] = {}
+    _news_at: Optional[datetime] = None
 
     def _adv(self, symbol: str) -> Optional[float]:
         if self.ctx and symbol in self.ctx.adv_shares:
@@ -277,6 +302,7 @@ class Orchestrator:
             "toxicity_by_symbol": self.toxicity, "vpin_by_symbol": self.vpin,
             "components": ctx.components if ctx else {},
             "radar_flags_observe_only": self.radar,
+            "news_observe_only": self.news,
             "notes": self.notes,
         }
         try:
@@ -315,6 +341,10 @@ class Orchestrator:
                         and now - self._ctx_built_at >= CONTEXT_RETRY):
                     log.warning("[CONTEXT] plan is not valid; rebuilding with fresh data")
                     await self.build_context()
+                if (self.mode == "live" and self.session.is_open(now) and self._news_at is not None
+                        and now - self._news_at >= NEWS_REFRESH):
+                    self.news = await asyncio.to_thread(news_overlay, list(self.ctx.target_weights))
+                    self._news_at = now
                 if not len(self.engine.intents):
                     reason = self.restart_requested()
                     if reason:
