@@ -42,6 +42,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import tempfile
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
@@ -73,6 +74,13 @@ def setup_logging(mode: str) -> str:
 
 LOCK_FILE = os.path.join(PROJECT_DIR, "titanq_live.lock")
 SHUTDOWN_AFTER_CLOSE = timedelta(minutes=15)
+# Graceful restart: create this file (any content = the reason) and the live loop finishes
+# its queued orders, saves, and exits with RESTART_EXIT_CODE; run_live.py then starts it
+# again on the current code. Used to apply a fix mid-session without killing a process.
+RESTART_FILE = os.path.join(PROJECT_DIR, "restart_trading_loop.request")
+RESTART_EXIT_CODE = 75
+CONTEXT_RETRY = timedelta(minutes=10)      # rebuild an invalid context this often in session
+_exit_code = 0
 
 
 def acquire_live_lock():
@@ -139,6 +147,8 @@ class Orchestrator:
         self.status = ""
         self.notes: List[str] = []
         self._seen_notes: set = set()
+        self._ctx_built_at: Optional[datetime] = None
+        self._started = datetime.now().timestamp()
 
     # ---- daily context ------------------------------------------------------
 
@@ -148,6 +158,7 @@ class Orchestrator:
         self.ctx = await asyncio.to_thread(build_daily_context, self.daily, self.feed.session_date,
                                            self.broker.equity(), holdings=sorted(self.broker.positions))
         save_context(self.ctx)
+        self._ctx_built_at = self.feed.now()
         self._seen_notes.clear()
         log.info("[CONTEXT] %s", self.ctx.summary())
         for name, st in self.ctx.components.items():
@@ -247,7 +258,24 @@ class Orchestrator:
         except Exception as exc:
             log.warning("dashboard export failed: %s", exc)
 
+    def context_degraded(self) -> bool:
+        """An invalid plan (bad data, a failed model load) is retried, not kept all day."""
+        return self.ctx is None or not self.ctx.tradeable or self.ctx.kelly_binding == "invalid_input"
+
+    def restart_requested(self) -> Optional[str]:
+        """Reason text if a restart request newer than this process exists."""
+        if self.mode != "live" or not os.path.exists(RESTART_FILE):
+            return None
+        if os.path.getmtime(RESTART_FILE) < self._started:
+            os.remove(RESTART_FILE)                  # left over from before this process
+            return None
+        with open(RESTART_FILE, encoding="ascii", errors="replace") as f:
+            reason = f.read().strip()[:200] or "no reason given"
+        os.remove(RESTART_FILE)
+        return reason
+
     async def run(self) -> None:
+        global _exit_code
         await self.build_context()
         self.update_toxicity()
         while True:
@@ -257,6 +285,19 @@ class Orchestrator:
                 if (self.mode == "live" and self.session.is_open(now)
                         and self.ctx.asof != str(now.date())):
                     await self.build_context()      # a new session began while running
+                elif (self.mode == "live" and self.session.is_open(now) and self.context_degraded()
+                        and now - self._ctx_built_at >= CONTEXT_RETRY):
+                    log.warning("[CONTEXT] plan is not valid; rebuilding with fresh data")
+                    await self.build_context()
+                if not len(self.engine.intents):
+                    reason = self.restart_requested()
+                    if reason:
+                        log.warning("[CONTROL] restart requested (%s): saving and exiting so "
+                                    "run_live.py restarts on the current code", reason)
+                        self.finish(f"RESTART REQUESTED ({reason})")
+                        _exit_code = RESTART_EXIT_CODE
+                        self.engine._running = False
+                        return
                 if new_bar:
                     self.update_toxicity()
                 self.step(now)
@@ -344,3 +385,4 @@ if __name__ == "__main__":
         asyncio.run(main(args))
     except KeyboardInterrupt:
         print("Shutting down...")
+    sys.exit(_exit_code)

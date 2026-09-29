@@ -13,9 +13,10 @@ echo.
 :: the trading loop never read its output. Market data now comes from
 :: market_data.py inside the trading loop itself.
 
-:: Launch the main trading loop. "cmd /k" keeps the window open if it exits,
+:: Launch the main trading loop under its supervisor (run_live.py restarts it after a crash
+:: or a requested restart during the session). "cmd /k" keeps the window open if it exits,
 :: so an error stays readable. Everything is also logged to logs\titanq_*.log
-start "Titan-Q Master Brain" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\main_trading_loop.py"
+start "Titan-Q Master Brain" cmd /k "D:\trader_env\Scripts\python.exe D:\Quant_Project\run_live.py"
 echo [OK] Master Trading Loop Armed.
 
 :: Launch the Angel One tick + order-book recorder (read-only; whole NSE market).

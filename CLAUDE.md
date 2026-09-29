@@ -49,7 +49,7 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 
 | Task | When | What |
 |---|---|---|
-| TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop, Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
+| TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop (under `run_live.py`), Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
 | TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
@@ -66,6 +66,22 @@ It never reveals a test period.
 Angel's history API has a cap of roughly 5,000 requests an hour. Above it, every request is
 refused for about 50 minutes. `angel_history.py` therefore runs at 1.2 requests a second
 and pauses all workers together whenever it gets a rate-limit answer. Never raise the rate.
+
+## Unattended operation (the user is away during market hours)
+
+- `run_live.py` supervises the live loop and restarts it until 15 minutes after the close.
+  A crash is restarted after 60 s. Exit code 75 is a requested restart and waits 5 s. It
+  allows at most 12 restarts a day.
+- **To apply a code fix mid-session:** fix and commit, then write a one-line reason to
+  `restart_trading_loop.request` in the project folder. The loop lets queued orders finish,
+  saves, and exits 75, and the supervisor starts it again on the new code. Do not kill the
+  process.
+- An invalid daily plan (not tradeable, or a NaN Kelly) is rebuilt with fresh data every 10
+  minutes in session.
+- The Angel recorder reconnects by itself: 30 s to 5 min backoff, and a watchdog for
+  connections silent for 3 minutes.
+- The school Wi-Fi intercepts HTTPS to finance sites, so a VPN must stay on. Never switch off
+  certificate checks.
 
 ## Data and research (2026-09-28)
 

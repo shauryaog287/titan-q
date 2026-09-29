@@ -34,3 +34,4 @@ paper_account*.json
 titanq_live.lock
 forward_test.lock
 reports/radar/
+restart_trading_loop.request
