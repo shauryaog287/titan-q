@@ -72,3 +72,18 @@
 - **Next studies:** delivery % and retail-frenzy reversal (DEL1), commodity-linked stocks,
   sector momentum (PSU and defence), intraday patterns, F&O participant positioning, order wins.
 - **One commit is not pushed yet** (GitHub is blocked on this network).
+
+## 2026-09-29, 07:30 IST: morning check
+
+- **Minute download (research set):** 3,380 of 22,731 chunks done, 28 failed (those get
+  re-swept). It stalled overnight because of the Wi-Fi interception, from about 22:34 until
+  the VPN came on (exit in Zurich). It is running again at about 69 a minute.
+  - It pauses itself 08:55-15:50 (the quiet-hours check runs before every request).
+  - Expected: about 9,600 done by 08:55, the research set complete around 19:00 tonight.
+- **M1 and VPIN:** not run yet, correctly; no marker, so the data is incomplete.
+  `after_download.ps1` (pid 27496) waits for the marker, then runs M1 and VPIN on
+  development data only and commits both. `after_m1.ps1` is superseded. No test period has
+  been revealed.
+- **During market hours:** nothing heavy runs. The downloader sleeps, and the research
+  chain waits for the marker.
+- **Pushed:** the commits that were held back overnight are on GitHub.
