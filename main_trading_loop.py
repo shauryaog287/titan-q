@@ -154,6 +154,31 @@ def radar_overlay(ctx: DailyContext) -> Dict[str, List[str]]:
 
 
 NEWS_REFRESH = timedelta(minutes=30)
+STALE_ALERT = timedelta(minutes=15)
+
+
+def alert(mode: str, title: str, message: str, priority: str = "default", tags: str = "",
+          repeat_minutes: float = 30.0) -> None:
+    """Phone alert (alerts.py, ntfy) for the live session only; never raises."""
+    if mode != "live":
+        return
+    try:
+        from alerts import send
+        send(title, message, priority=priority, tags=tags, repeat_minutes=repeat_minutes)
+    except Exception:
+        pass
+
+
+def day_open_equity(day: str, equity: float) -> float:
+    """The paper equity at the first trading step of `day`, kept in a file so a restart
+    mid-session cannot reset the daily loss limit."""
+    path = os.path.join(LOGS_DIR, f"day_open_equity_{day}.json")
+    if os.path.exists(path):
+        with open(path, encoding="ascii") as f:
+            return float(json.load(f)["equity"])
+    with open(path, "w", encoding="ascii") as f:
+        json.dump({"equity": equity}, f)
+    return equity
 
 
 def news_overlay(symbols) -> Dict[str, Dict]:
@@ -194,6 +219,9 @@ class Orchestrator:
         self._seen_notes: set = set()
         self._ctx_built_at: Optional[datetime] = None
         self._started = datetime.now().timestamp()
+        self._open_equity: Optional[float] = None
+        self.halted = False
+        self._stale_since: Optional[datetime] = None
 
     # ---- daily context ------------------------------------------------------
 
@@ -214,6 +242,13 @@ class Orchestrator:
         self.radar = radar_overlay(self.ctx)
         self.news = news_overlay(list(self.ctx.target_weights))
         self._news_at = self.feed.now()
+        if self.context_degraded():
+            alert(self.mode, "plan not valid", "Today's plan cannot trade: " + "; ".join(self.ctx.reasons)[:300]
+                  + ". It is rebuilt every 10 minutes.", "high", "warning", repeat_minutes=60)
+        else:
+            alert(self.mode, "plan ready", f"{self.ctx.regime}, exposure {100 * self.ctx.exposure:.0f}% in "
+                  f"{len(self.ctx.target_weights)} stocks; equity Rs. {self.broker.equity():,.0f}.", "low",
+                  "chart_with_upwards_trend", repeat_minutes=240)
 
     radar: Dict[str, List[str]] = {}
     news: Dict[str, Dict] = {}
@@ -249,7 +284,13 @@ class Orchestrator:
             return
         if self.feed.is_stale():
             self.set_status("waiting: no new 1-minute bar (feed stale or exchange holiday)")
+            self._stale_since = self._stale_since or now
+            if now - self._stale_since >= STALE_ALERT:
+                alert(self.mode, "price feed stale", f"No new 1-minute bars since "
+                      f"{self._stale_since.strftime('%H:%M')} (network or VPN down?). Trading waits.",
+                      "high", "warning")
             return
+        self._stale_since = None
         if self.engine.state is not EngineState.LIVE:
             self.set_status(f"waiting: execution engine is {self.engine.state.name}")
             return
@@ -258,6 +299,20 @@ class Orchestrator:
             return
         if len(self.engine.intents):
             return                                  # let queued orders execute first
+        eq = self.broker.equity()
+        if self._open_equity is None:
+            self._open_equity = day_open_equity(str(now.date()), eq) if self.mode == "live" else eq
+        if not self.halted and eq < self._open_equity * (1 - CONFIG.daily_loss_halt):
+            self.halted = True
+            log.error("[RISK] daily loss limit: equity Rs. %s is %.1f%% below today's open Rs. %s; "
+                      "no new orders today", f"{eq:,.2f}", 100 * (1 - eq / self._open_equity),
+                      f"{self._open_equity:,.2f}")
+            alert(self.mode, "daily loss limit hit", f"Paper equity Rs. {eq:,.0f} is "
+                  f"{100 * (1 - eq / self._open_equity):.1f}% below the open. No new orders today.",
+                  "urgent", "rotating_light", repeat_minutes=600)
+        if self.halted:
+            self.set_status(f"HALTED: daily loss limit ({100 * CONFIG.daily_loss_halt:.0f}%); no new orders today")
+            return
         self.set_status("trading")
 
         positions = dict(self.broker.positions)
@@ -304,6 +359,7 @@ class Orchestrator:
             "target_weights": ctx.target_weights if ctx else {},
             "toxicity_by_symbol": self.toxicity, "vpin_by_symbol": self.vpin,
             "components": ctx.components if ctx else {},
+            "halted_daily_loss_limit": self.halted,
             "radar_flags_observe_only": self.radar,
             "news_observe_only": self.news,
             "notes": self.notes,
@@ -388,6 +444,12 @@ class Orchestrator:
                                                    + SHUTDOWN_AFTER_CLOSE):
                     await asyncio.to_thread(self.feed.store.archive, self.feed._bars)
                     self.finish(f"SESSION {now.date()} CLOSED")
+                    snap = self.broker.snapshot()
+                    today = [t for t in self.broker.trade_history if t.get("time", "").startswith(str(now.date()))]
+                    day_pnl = snap["equity"] - (self._open_equity or snap["equity"])
+                    alert(self.mode, "session closed", f"Equity Rs. {snap['equity']:,.0f} (today Rs. "
+                          f"{day_pnl:+,.0f}; since start Rs. {snap['pnl']:+,.0f}), {len(today)} trades today, "
+                          f"{len(snap['positions'])} holdings.", "default", "bar_chart", repeat_minutes=600)
                     start_forward_test()
                     self.engine._running = False
                     return

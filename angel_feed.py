@@ -447,12 +447,23 @@ def cmd_record(until: Optional[str] = None) -> None:
     log.info("recording %d NSE equities on %d connections until %s", len(tokens),
              len(stream.sockets), end.strftime("%H:%M IST"))
     last_report, last_rows = time.time(), 0
+    last_growth, rows_seen = time.time(), 0
     try:
         while now_ist() < end:
             time.sleep(2.0)
             rec.maybe_flush()
             if session.is_open(now_ist()):
                 stream.check_stalls()
+                if rec.rows_total != rows_seen:
+                    last_growth, rows_seen = time.time(), rec.rows_total
+                elif time.time() - last_growth > 600:
+                    try:
+                        from alerts import send
+                        send("tick recorder silent", f"No ticks for {(time.time() - last_growth) / 60:.0f} "
+                             "minutes during the session (network/VPN down?). It keeps reconnecting.",
+                             priority="high", tags="warning", repeat_minutes=30)
+                    except Exception:
+                        pass
             if time.time() - last_report >= 60:
                 rate = (rec.rows_total - last_rows) / (time.time() - last_report)
                 log.info("rows %d (%.0f/s) | tokens seen %d | files %d | %.1f MB written",

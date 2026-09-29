@@ -160,6 +160,11 @@ class Config:
     te_bins: int = 6
     te_surrogates: int = 100
 
+    # ---- daily loss limit ---------------------------------------------------------
+    # If paper equity falls this far below the day's opening equity, no new orders are
+    # sent for the rest of the day (nothing is sold in a panic either) and an alert goes out.
+    daily_loss_halt: float = 0.03
+
     # ---- rebalancing -----------------------------------------------------------
     min_trade_value: float = 2_000.0       # ignore trades smaller than this (Rs.)
     rebalance_band: float = 0.20           # trade only if a position is >20% off target

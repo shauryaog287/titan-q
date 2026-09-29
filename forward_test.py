@@ -140,6 +140,8 @@ def update(force: bool = False) -> None:
     if coverage < MIN_COVERAGE:
         log.warning("%s: only %.0f%% of stocks have today's close (data refresh failed?); not "
                     "recording, run again once the data is complete", day, 100 * coverage)
+        _alert("forward test not recorded", f"{day}: only {100 * coverage:.0f}% of today's closes "
+               "arrived (network/VPN?). It retries at 16:30 and on the next run.", "high")
         return
     state = _load_state()
     broker = PaperTradingBroker(CONFIG.initial_capital, price_fn=lambda s: close.get(s),
@@ -182,6 +184,17 @@ def update(force: bool = False) -> None:
     _save_state(state)
     log.info("%s: forward equity Rs. %s (%d holdings), EW benchmark %.2f", day, f"{eq:,.2f}",
              len(broker.positions), b["level"])
+    _alert("forward test", f"{day}: composite top-30 Rs. {eq:,.0f} "
+           f"({100 * (eq / CONFIG.initial_capital - 1):+.2f}% since start), equal-weight market "
+           f"{b['level'] - 100:+.2f}%, {trades} trades today.", "low")
+
+
+def _alert(title: str, message: str, priority: str) -> None:
+    try:
+        from alerts import send
+        send(title, message, priority=priority, repeat_minutes=120)
+    except Exception:
+        pass
 
 
 def report() -> None:

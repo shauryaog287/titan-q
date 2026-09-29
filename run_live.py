@@ -54,12 +54,25 @@ def main() -> None:
         restarts += 1
         if restarts > MAX_RESTARTS:
             log.error("%d restarts today; giving up until tomorrow's scheduled start", MAX_RESTARTS)
+            alert("trading STOPPED", f"The trading loop failed {MAX_RESTARTS} times today and was not "
+                  "restarted again. Paper trading is off until tomorrow's 09:10 start.", "urgent", "rotating_light")
             return
         wait = 5 if rc == RESTART_EXIT_CODE else 60
         log.warning("%s; restarting in %d s (restart %d of %d)",
                     "restart requested" if rc == RESTART_EXIT_CODE else "the loop crashed",
                     wait, restarts, MAX_RESTARTS)
+        if rc != RESTART_EXIT_CODE:
+            alert("trading loop crashed", f"Exit code {rc} at {now.strftime('%H:%M')}; restarting in "
+                  f"{wait} s (restart {restarts} of {MAX_RESTARTS}).", "high", "warning")
         time.sleep(wait)
+
+
+def alert(title: str, message: str, priority: str, tags: str) -> None:
+    try:
+        from alerts import send
+        send(title, message, priority=priority, tags=tags, repeat_minutes=10)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
