@@ -121,3 +121,17 @@
   - A watchdog closes and reconnects any connection that is silent for 3 minutes.
   - An offline self-test covers both.
   - The fix applies from tomorrow.
+
+## 2026-09-29, 15:55 IST: post-close check
+
+- **Live session:** closed normally at 15:45 with 0 trades (this morning's 0% plan, fixed
+  since), today's bars archived, and the forward-test update started.
+- **Replay of today with the fixed code:** Kelly 1.000, exposure 100% in 50 stocks, 46 trades
+  (4 stocks cost more per share than their target), fees Rs. 503.26, PnL Rs. -780.09 on the
+  day, 0 errors. The radar overlay logged 2 flags (M&M and SHREECEM, credit rating
+  announcements) in observe mode.
+- **The VPN dropped at about 15:35:** the exit is the school network again (Mumbai), so
+  Yahoo, Angel, NSE and GitHub are intercepted.
+  - The minute download resumed at 15:50, but every request fails. The running (old)
+    version gives up on those chunks; later sweeps retry them.
+  - Local commits wait to be pushed.
