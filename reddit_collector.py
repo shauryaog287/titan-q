@@ -1,17 +1,20 @@
 """
 reddit_collector.py
 ===================
-Retail chatter from Reddit's official API (read-only, free for personal use): posts and
-comments of Indian stock-market subreddits, tagged to NSE stocks, toned with FinBERT,
-archived point-in-time. Replaces the old Selenium scraper (social_media_scanner.py),
-which disguised a browser to scrape pages against Reddit's rules.
+Retail chatter from Indian stock-market subreddits: posts and comments tagged to NSE
+stocks, toned with FinBERT, archived point-in-time. Replaces the old Selenium scraper
+(social_media_scanner.py), which disguised a browser to get past Reddit's bot detection.
 
     D:\\trader_env\\Scripts\\python.exe reddit_collector.py            collect (scheduled hourly)
     D:\\trader_env\\Scripts\\python.exe reddit_collector.py --report   most-mentioned stocks, last 24 h vs usual
 
-Needs reddit_credentials.json (git-ignored) with the "script" app you create at
-https://www.reddit.com/prefs/apps (see reddit_credentials.example.json). Without it the
-script logs that and exits; nothing else depends on it.
+Two honest ways in, nothing disguised:
+- Reddit's official API, when reddit_credentials.json exists (a registered "script" app;
+  see reddit_credentials.example.json). Since 2025 new apps need Reddit's approval.
+- Otherwise Reddit's public RSS feeds (new posts and new comments of each subreddit), read
+  like any feed reader: an identifying User-Agent, one feed a minute, once an hour. Reddit
+  answered 429 to feeds 3 s apart (2026-09-29), so a refused feed is skipped for that run.
+  RSS carries no upvote counts.
 
 Files: data/social/reddit_<date>.parquet (first_seen, created, subreddit, kind, id,
 text, upvotes, symbols, tone), copied to G:\\My Drive\\Titan-Q_History\\social.
@@ -91,21 +94,55 @@ def fetch(creds: Dict[str, str]) -> List[Dict]:
     return out
 
 
+RSS_UA = {"User-Agent": "windows:titan-q-feedreader:v1 (personal RSS reader, hourly)"}
+RSS_GAP_SECONDS = 60.0
+
+
+def fetch_rss() -> List[Dict]:
+    """New posts and new comments of each subreddit from Reddit's public RSS feeds."""
+    import time
+    import feedparser
+    import requests
+    out: List[Dict] = []
+    cutoff = (now_ist() - timedelta(hours=26)).timestamp()
+    feeds = [(name, kind, f"https://www.reddit.com/r/{name}/{'new' if kind == 'post' else 'comments'}/.rss?limit=100")
+             for name in SUBREDDITS for kind in ("post", "comment")]
+    for i, (name, kind, url) in enumerate(feeds):
+        if i:
+            time.sleep(RSS_GAP_SECONDS)
+        try:
+            r = requests.get(url, headers=RSS_UA, timeout=30)
+            if r.status_code != 200:
+                log.warning("r/%s %ss: HTTP %d, skipped this run", name, kind, r.status_code)
+                continue
+            for e in feedparser.parse(r.content).entries:
+                ts = e.get("updated_parsed") or e.get("published_parsed")
+                created = pd.Timestamp(*ts[:6], tz="UTC").timestamp() if ts else None
+                if created is None or created < cutoff:
+                    continue
+                body = re.sub(r"<[^>]+>", " ", e.get("summary", "") or "")
+                text = e.get("title", "") if kind == "post" else ""
+                out.append({"subreddit": name, "kind": kind, "id": e.get("id", e.get("link", "")),
+                            "created": created, "text": f"{text}. {body}"[:600] if text else body[:600],
+                            "upvotes": -1})
+        except Exception as exc:
+            log.warning("r/%s %ss: %s", name, kind, type(exc).__name__)
+    return out
+
+
 def day_file(d) -> str:
     return os.path.join(SOCIAL_DIR, f"reddit_{d}.parquet")
 
 
 def collect() -> int:
     creds = credentials()
-    if not creds:
-        log.info("no Reddit credentials (reddit_credentials.json); skipped")
-        return 0
     from news_analyser import ascii_text, equity_list, finbert_scores
     from universe import load_universe
     uni = load_universe()
     tradable = set(uni.loc[uni["tier"] == "tradable", "symbol"].str.replace("-EQ", "", regex=False))
     tagger = make_tagger(sorted(tradable & set(equity_list()["symbol"])))
-    items = fetch(creds)
+    items = fetch(creds) if creds else fetch_rss()
+    log.info("source: %s", "official API" if creds else "public RSS feeds")
     now = now_ist()
     os.makedirs(SOCIAL_DIR, exist_ok=True)
     path = day_file(now.date())
