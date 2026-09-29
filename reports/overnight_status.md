@@ -135,3 +135,23 @@
   - The minute download resumed at 15:50, but every request fails. The running (old)
     version gives up on those chunks; later sweeps retry them.
   - Local commits wait to be pushed.
+
+## 2026-09-29, 22:25 IST: evening
+
+- **Network:** fine on the phone hotspot (Airtel, India). There was a brief DNS drop at
+  22:23.
+- **Forward test:** 2026-09-29 recorded at 16:41 with complete prices. Composite top-30
+  Rs. 505,843.09 (+1.2% since the start), equal-weight market 99.56.
+- **Disclosure radar:** ran at 19:55 and archived to G:.
+- **DEL1 (delivery %), development 2016-2020:** does not qualify; the test stays sealed.
+  - DEL1a abnormal delivery: IC t 2.89, but decile excess -0.2%/yr.
+  - DEL1b retail-frenzy reversal: 955 events, 10-day excess -0.12%, t +0.02.
+- **FO1 (F&O positioning):** the download is at 300/2647 days. Early days failed while the
+  network was down; a second pass fills them. The development run follows when it is
+  complete.
+- **Cloud run (CM1 commodity-linked, SM1 industry momentum):** rules and instructions are
+  pushed (`reports/cloud_task_2026-09-29.md`). It could not be launched from this session
+  (the CLI needs an interactive terminal; the remote agent could not see git). The user
+  starts it from claude.ai/code or with `claude --cloud`.
+- **Laptop sleep:** the 08:50 preflight and the 09:10 trading task can now wake it on mains
+  power, and the session keeps it awake until the close.
