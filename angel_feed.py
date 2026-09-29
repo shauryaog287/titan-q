@@ -238,6 +238,22 @@ class TickRecorder:
             self.bytes_written += os.path.getsize(path)
 
 
+LATEST_FILE = os.path.join(TICK_DIR, "latest_prices.json")
+TOKEN_MAP_FILE = os.path.join(TICK_DIR, "token_map.json")
+
+
+def write_latest(rec: "TickRecorder", path: str = LATEST_FILE) -> None:
+    """Latest price per token, for other processes (the trading loop's shadow check).
+    Written atomically so a reader never sees half a file."""
+    with rec._lock:
+        snap = {t: {"ltp": r["ltp"], "exch_ts": r["exch_ts"], "recv_ts": r["recv_ts"], "volume": r["volume"]}
+                for t, r in rec.latest.items()}
+    tmp = path + ".partial"
+    with open(tmp, "w", encoding="ascii") as f:
+        json.dump({"written": time.time(), "prices": snap}, f)
+    os.replace(tmp, path)
+
+
 def load_session_ticks(day: str, root: str = TICK_DIR) -> pd.DataFrame:
     """All recorded rows for one day (YYYY-MM-DD), sorted by receive time."""
     d = os.path.join(root, day)
@@ -440,6 +456,9 @@ def cmd_record(until: Optional[str] = None) -> None:
     tokens = eq["token"].tolist()
     api, jwt, feed, client = login(creds)
     rec = TickRecorder()
+    os.makedirs(TICK_DIR, exist_ok=True)
+    with open(TOKEN_MAP_FILE, "w", encoding="ascii") as f:                 # token -> Yahoo ticker
+        json.dump(dict(zip(eq["token"], eq["yahoo"])), f)
     stream = MarketStream(jwt, creds["api_key"], client, feed, tokens, rec)
     stream.start()
     end = (datetime.combine(now_ist().date(), datetime.strptime(until, "%H:%M").time(), IST)
@@ -448,10 +467,17 @@ def cmd_record(until: Optional[str] = None) -> None:
              len(stream.sockets), end.strftime("%H:%M IST"))
     last_report, last_rows = time.time(), 0
     last_growth, rows_seen = time.time(), 0
+    last_latest = 0.0
     try:
         while now_ist() < end:
             time.sleep(2.0)
             rec.maybe_flush()
+            if time.time() - last_latest >= 10:
+                last_latest = time.time()
+                try:
+                    write_latest(rec)
+                except Exception as exc:
+                    log.warning("latest prices not written: %s", exc)
             if session.is_open(now_ist()):
                 stream.check_stalls()
                 if rec.rows_total != rows_seen:

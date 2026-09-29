@@ -47,6 +47,7 @@ import tempfile
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from titanq_config import CONFIG, INDEX_SYMBOL, LOGS_DIR, PROJECT_DIR, STATE_FILE, UNIVERSE
@@ -232,6 +233,38 @@ def attention_overlay(symbols) -> Dict[str, Dict]:
     return out
 
 
+ANGEL_SHADOW_EVERY = timedelta(minutes=5)
+
+
+def angel_shadow(symbols, yahoo_price, now_ts: float) -> Optional[Dict]:
+    """Compare the Angel recorder's latest prices (data/ticks/latest_prices.json) with the
+    Yahoo feed the loop trades on. SHADOW only: nothing trades on Angel prices until a few
+    sessions show they agree and are fresher."""
+    from angel_feed import LATEST_FILE, TOKEN_MAP_FILE
+    if not (os.path.exists(LATEST_FILE) and os.path.exists(TOKEN_MAP_FILE)):
+        return None
+    with open(TOKEN_MAP_FILE, encoding="ascii") as f:
+        by_yahoo = {y: t for t, y in json.load(f).items()}
+    with open(LATEST_FILE, encoding="ascii") as f:
+        latest = json.load(f)
+    diffs, ages, missing = [], [], 0
+    for s in symbols:
+        a = latest["prices"].get(by_yahoo.get(s, ""))
+        y = yahoo_price(s)
+        if not a or not a.get("ltp") or not y:
+            missing += 1
+            continue
+        diffs.append((abs(a["ltp"] / y - 1) * 1e4, s))
+        ages.append(now_ts - (a.get("exch_ts") or a["recv_ts"]))
+    if not diffs:
+        return {"compared": 0, "missing": missing, "file_age_s": round(now_ts - latest["written"], 1)}
+    d = sorted(diffs)
+    return {"compared": len(d), "missing": missing, "median_diff_bps": round(d[len(d) // 2][0], 1),
+            "max_diff_bps": round(d[-1][0], 1), "max_diff_symbol": d[-1][1],
+            "median_angel_age_s": round(float(np.median(ages)), 1),
+            "file_age_s": round(now_ts - latest["written"], 1)}
+
+
 class Orchestrator:
     def __init__(self, mode: str, feed, broker: PaperTradingBroker, engine: ExecutionEngine,
                  store: DailyStore, session: Session) -> None:
@@ -287,6 +320,8 @@ class Orchestrator:
     radar: Dict[str, List[str]] = {}
     news: Dict[str, Dict] = {}
     attention: Dict[str, Dict] = {}
+    shadow: Dict = {}
+    _shadow_at: Optional[datetime] = None
     _news_at: Optional[datetime] = None
 
     def _adv(self, symbol: str) -> Optional[float]:
@@ -398,6 +433,7 @@ class Orchestrator:
             "radar_flags_observe_only": self.radar,
             "news_observe_only": self.news,
             "attention_observe_only": self.attention,
+            "angel_shadow": self.shadow,
             "notes": self.notes,
         }
         try:
@@ -458,6 +494,16 @@ class Orchestrator:
                         and now - self._news_at >= NEWS_REFRESH):
                     self.news = await asyncio.to_thread(news_overlay, list(self.ctx.target_weights))
                     self._news_at = now
+                if (self.mode == "live" and self.session.is_open(now)
+                        and (self._shadow_at is None or now - self._shadow_at >= ANGEL_SHADOW_EVERY)):
+                    self._shadow_at = now
+                    try:
+                        self.shadow = angel_shadow(list(self.ctx.target_weights), self.feed.last_price,
+                                                   now.timestamp()) or {}
+                        if self.shadow:
+                            log.info("[ANGEL SHADOW] %s", self.shadow)
+                    except Exception as exc:
+                        log.warning("[ANGEL SHADOW] failed: %s", exc)
                 if not len(self.engine.intents):
                     reason = self.restart_requested()
                     if reason:
