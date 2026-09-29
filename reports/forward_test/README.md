@@ -53,3 +53,16 @@ The file is committed to git regularly, so each day's result carries a timestamp
   exactly this reason.
 - The universe list is today's listed stocks. Going forward this no longer matters:
   delistings that happen from now on will show up in the data.
+
+## Corrections
+
+- **2026-09-29:** the row recorded at 15:48 was removed, and the data was not retouched in any
+  other way.
+  - The network had dropped minutes earlier, so the price refresh failed (0 of 2,703 symbols).
+    Only the ~50 stocks that the live loop had fetched that morning had a row for the day.
+  - The holdings had no price, so the equity shown was their cost basis, and the equal-weight
+    benchmark stayed at 100.00. No trades were made that day.
+  - `forward_test.py` now refuses to record unless 90% of the stocks that closed the day
+    before also have the day's close.
+  - The day is re-recorded if the data arrives before midnight. Otherwise the record simply
+    skips it.

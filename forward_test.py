@@ -42,6 +42,7 @@ LOG_FILE = os.path.join(FT_DIR, "composite_top30.csv")
 STATE_FILE = os.path.join(FT_DIR, "state.json")
 ACCOUNT_FILE = os.path.join(PROJECT_DIR, "paper_account_shadow.json")
 TOP_N = 30
+MIN_COVERAGE = 0.90                   # share of yesterday's stocks that must have today's close
 
 
 def load_panels(refresh: bool = True):
@@ -131,6 +132,15 @@ def update(force: bool = False) -> None:
         log.info("%s already recorded", day)
         return
     close = px.iloc[i].drop(labels=[INDEX_SYMBOL])
+    # On 2026-09-29 the network dropped before this ran: the refresh failed, only the ~50 stocks
+    # the live loop had fetched that morning had a row for the day, and a bogus record was
+    # written. Record only when nearly every stock that closed yesterday also has today's close.
+    had = px.iloc[i - 1].drop(labels=[INDEX_SYMBOL]).notna()
+    coverage = float(close[had].notna().mean()) if had.any() else 0.0
+    if coverage < MIN_COVERAGE:
+        log.warning("%s: only %.0f%% of stocks have today's close (data refresh failed?); not "
+                    "recording, run again once the data is complete", day, 100 * coverage)
+        return
     state = _load_state()
     broker = PaperTradingBroker(CONFIG.initial_capital, price_fn=lambda s: close.get(s),
                                 clock_fn=lambda: datetime.combine(day, dtime(15, 30), IST),
