@@ -11,10 +11,11 @@ stocks, toned with FinBERT, archived point-in-time. Replaces the old Selenium sc
 Two honest ways in, nothing disguised:
 - Reddit's official API, when reddit_credentials.json exists (a registered "script" app;
   see reddit_credentials.example.json). Since 2025 new apps need Reddit's approval.
-- Otherwise Reddit's public RSS feeds (new posts and new comments of each subreddit), read
-  like any feed reader: an identifying User-Agent, one feed a minute, once an hour. Reddit
-  answered 429 to feeds 3 s apart (2026-09-29), so a refused feed is skipped for that run.
-  RSS carries no upvote counts.
+- Otherwise Reddit's public RSS feeds (the newest 100 posts of each subreddit), read like
+  any feed reader with an identifying User-Agent: ONE request per run, rotating through the
+  subreddits, a run every 20 minutes. Reddit refused almost every request at one a minute
+  (2026-09-29); a refused feed is simply skipped. RSS carries no upvote counts, and
+  comments are not collected.
 
 Files: data/social/reddit_<date>.parquet (first_seen, created, subreddit, kind, id,
 text, upvotes, symbols, tone), copied to G:\\My Drive\\Titan-Q_History\\social.
@@ -94,22 +95,27 @@ def fetch(creds: Dict[str, str]) -> List[Dict]:
     return out
 
 
-RSS_UA = {"User-Agent": "windows:titan-q-feedreader:v1 (personal RSS reader, hourly)"}
-RSS_GAP_SECONDS = 60.0
+RSS_UA = {"User-Agent": "windows:titan-q-feedreader:v1 (personal RSS reader)"}
+RSS_STATE = os.path.join(PROJECT_DIR, "logs", "reddit_rss_state.json")
 
 
 def fetch_rss() -> List[Dict]:
-    """New posts and new comments of each subreddit from Reddit's public RSS feeds."""
-    import time
+    """ONE feed per run: the newest 100 posts of the next subreddit in rotation. Reddit's
+    public feeds refused almost every request at one a minute (2026-09-29), so the task runs
+    every 20 minutes and makes a single request each time (3 an hour)."""
     import feedparser
     import requests
     out: List[Dict] = []
     cutoff = (now_ist() - timedelta(hours=26)).timestamp()
-    feeds = [(name, kind, f"https://www.reddit.com/r/{name}/{'new' if kind == 'post' else 'comments'}/.rss?limit=100")
-             for name in SUBREDDITS for kind in ("post", "comment")]
-    for i, (name, kind, url) in enumerate(feeds):
-        if i:
-            time.sleep(RSS_GAP_SECONDS)
+    try:
+        with open(RSS_STATE, encoding="ascii") as f:
+            k = int(json.load(f).get("next", 0))
+    except (OSError, ValueError):
+        k = 0
+    name, kind = SUBREDDITS[k % len(SUBREDDITS)], "post"
+    with open(RSS_STATE, "w", encoding="ascii") as f:
+        json.dump({"next": (k + 1) % len(SUBREDDITS)}, f)
+    for name, kind, url in [(name, kind, f"https://www.reddit.com/r/{name}/new/.rss?limit=100")]:
         try:
             r = requests.get(url, headers=RSS_UA, timeout=30)
             if r.status_code != 200:
