@@ -80,7 +80,9 @@ def signals_at(px: pd.DataFrame, a: int, stocks: List[str]) -> pd.DataFrame:
 
 
 def monthly_study(px: pd.DataFrame, vol: pd.DataFrame, signal_names=SIGNALS,
-                  composite: List[str] = ()) -> pd.DataFrame:
+                  composite: List[str] = (), signal_fn=None) -> pd.DataFrame:
+    """signal_fn(px, a, stocks) -> DataFrame of signals (default signals_at); lets other
+    studies (delivery_research.py) reuse exactly this machinery."""
     value = px.drop(columns=[INDEX_SYMBOL]) * vol
     idx = px.index
     ends = [i for i in range(len(idx) - 1) if idx[i].month != idx[i + 1].month]
@@ -92,7 +94,7 @@ def monthly_study(px: pd.DataFrame, vol: pd.DataFrame, signal_names=SIGNALS,
         stocks = eligible_at(px, value, a)
         if len(stocks) < 50:
             continue
-        sig = signals_at(px, a, stocks)
+        sig = (signal_fn or signals_at)(px, a, stocks)
         if composite:
             z = (sig[list(composite)] - sig[list(composite)].mean()) / sig[list(composite)].std()
             sig["COMPOSITE"] = z.mean(axis=1)
