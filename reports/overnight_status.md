@@ -179,3 +179,7 @@ Yahoo, Angel, NSE and GitHub are intercepted. The loop has waited since 09:15 wi
 "price feed stale" alerts went out at 09:30 and 10:00. The recorder retries its login every
 minute. Both resume by themselves once a clean connection (a working VPN or the hotspot) is
 available. The next check is at 11:07.
+
+**2026-09-30, 11:07 IST.** Unchanged: the school network (Jio, Mumbai) still intercepts
+Yahoo, Angel, NSE and GitHub. The loop is waiting (0 trades; stale alerts every 30 minutes)
+and the recorder retries its login every minute. The next check is at 12:07.
