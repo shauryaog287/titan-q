@@ -173,3 +173,9 @@
     scrip-master refresh falls back to the cached copy.
   - Restarted by hand at 09:23; it is waiting for the network.
 - **Pending:** commits wait to be pushed (GitHub is blocked on this network).
+
+**2026-09-30, 10:07 IST.** Still blocked: the exit is the school network (Jio, Mumbai), and
+Yahoo, Angel, NSE and GitHub are intercepted. The loop has waited since 09:15 with 0 trades;
+"price feed stale" alerts went out at 09:30 and 10:00. The recorder retries its login every
+minute. Both resume by themselves once a clean connection (a working VPN or the hotspot) is
+available. The next check is at 11:07.
