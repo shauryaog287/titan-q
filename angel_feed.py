@@ -77,11 +77,16 @@ def load_scrip_master(max_age_hours: float = 20.0) -> List[dict]:
     os.makedirs(ANGEL_DIR, exist_ok=True)
     path = os.path.join(ANGEL_DIR, "scrip_master.json")
     if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 3600 * max_age_hours:
-        r = requests.get(SCRIP_MASTER_URL, timeout=180)
-        r.raise_for_status()
-        with open(path, "wb") as f:
-            f.write(r.content)
-        log.info("scrip master refreshed (%d bytes)", len(r.content))
+        try:
+            r = requests.get(SCRIP_MASTER_URL, timeout=180)
+            r.raise_for_status()
+            with open(path, "wb") as f:
+                f.write(r.content)
+            log.info("scrip master refreshed (%d bytes)", len(r.content))
+        except Exception as exc:
+            if not os.path.exists(path):
+                raise
+            log.warning("scrip master not refreshed (%s); using the cached copy", type(exc).__name__)
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -454,7 +459,25 @@ def cmd_record(until: Optional[str] = None) -> None:
         return
     eq = nse_equities(load_scrip_master())
     tokens = eq["token"].tolist()
-    api, jwt, feed, client = login(creds)
+    # On 2026-09-30 the login hit an intercepting network (VPN off) and the recorder died
+    # before the open. Keep trying until the network works or the session ends.
+    close = session.bounds(now_ist().date())[1]
+    while True:
+        try:
+            api, jwt, feed, client = login(creds)
+            break
+        except Exception as exc:
+            if now_ist() >= close:
+                log.error("no Angel login before the close (%s); nothing recorded today", type(exc).__name__)
+                return
+            log.warning("Angel login failed (%s: %s); retrying in 60 s", type(exc).__name__, str(exc)[:120])
+            try:
+                from alerts import send
+                send("tick recorder cannot log in", f"Angel login failing ({type(exc).__name__}); network or "
+                     "VPN down? It retries every minute.", priority="high", tags="warning", repeat_minutes=30)
+            except Exception:
+                pass
+            time.sleep(60)
     rec = TickRecorder()
     os.makedirs(TICK_DIR, exist_ok=True)
     with open(TOKEN_MAP_FILE, "w", encoding="ascii") as f:                 # token -> Yahoo ticker

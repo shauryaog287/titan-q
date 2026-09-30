@@ -155,3 +155,21 @@
   starts it from claude.ai/code or with `claude --cloud`.
 - **Laptop sleep:** the 08:50 preflight and the 09:10 trading task can now wake it on mains
   power, and the session keeps it awake until the close.
+
+## 2026-09-30, 09:25 IST: live-start check
+
+- **The fixes worked:**
+  - the task started at 09:10 under the supervisor;
+  - the plan is Kelly 1.000 and 100% in 50 stocks, although Yahoo refused every refresh (0/51;
+    the cache was used);
+  - the observe overlays and the "plan ready" alert all worked.
+- **But the laptop is on school Wi-Fi without a working VPN** (exit: Jio, Mumbai), so Yahoo,
+  Angel, NSE and GitHub are intercepted.
+  - The 08:50 preflight caught it and sent an urgent alert.
+  - The loop has been waiting since 09:15 ("feed stale"). It trades by itself as soon as
+    prices get through.
+- **Recorder:** it crashed at login on the intercepted network, and nothing restarts it.
+  - Fixed: the login now retries every minute until the close, with an alert, and a failed
+    scrip-master refresh falls back to the cached copy.
+  - Restarted by hand at 09:23; it is waiting for the network.
+- **Pending:** commits wait to be pushed (GitHub is blocked on this network).
