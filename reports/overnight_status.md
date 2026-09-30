@@ -193,3 +193,20 @@ and the recorder retries its login every minute. The next check is at 12:07.
 **2026-09-30, 14:07 IST.** Unchanged: the school network still intercepts the finance sites.
 0 trades, the loop is waiting, and the recorder keeps retrying. The last check of the session
 is at 15:07.
+
+**2026-09-30, the day.** There was no paper trading and no tick recording today. The laptop
+spent the whole session on the school Wi-Fi without a working VPN. The exit was Jio, Mumbai,
+at every check from 07:30 to 15:07; the network intercepted HTTPS to Yahoo, Angel, NSE and
+GitHub.
+- **What worked:** the software did what it was built to do.
+  - The 09:10 start ran under the supervisor, and the plan was valid (Kelly 1.000, 100% in
+    50 stocks) from cached data.
+  - The 08:50 preflight raised an urgent alert. The loop waited and sent a stale-feed alert
+    every 30 minutes.
+  - The recorder, fixed at 09:23, retried its login every minute instead of dying.
+- **Nothing was lost:** the paper account is untouched (Rs. 500,000, no positions).
+- **Consequences for tonight:** the forward-test update, news, radar and Trends will fail the
+  same way until the laptop has a clean connection. Six or more commits wait to be pushed.
+- **Lesson:** the trading PC needs a connection that is not intercepted, either a VPN that
+  covers the whole machine and reconnects on its own, or the hotspot. Alternatively, a small
+  cloud server in Mumbai.
