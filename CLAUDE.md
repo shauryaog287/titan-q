@@ -175,16 +175,10 @@ pre-registered protocol in `reports/preregistration_sizing_vol.md`:
 
 The decisions are in `reports/decision_sizing_vol_{dev,test}.md`.
 
-v3.2 (2026-10-01), the user's risk choice: `sizing_mode="full"` (always 100% invested;
-Kelly is logged only), and ALL brakes off: CRASH and UNKNOWN regime multipliers 1.0, the novel
-regime multiplier 1.0, and `es_trim` 1.0. The only brake left is the 3% daily loss halt. This is a
-risk preference, not a protocol result. The exploratory "market" variant of 2019-2026 is the
-closest backtest: CAGR 16.4%, max drawdown 33%, against 24% with brakes. To restore the brakes, set
-`sizing_mode="kelly"`, CRASH 0.0, UNKNOWN 0.5, novel 0.5 and `es_trim` 0.5. The next open question for
-the same protocol is whether the CRASH, novel and EVT limits earn their place: the strategy was
-fully in cash on 102 days in 2021-2026. `sizing_experiment_decide.py` applies a written rule
-mechanically. Keep that pattern: write the rule, run development, commit the decision, then
-run the test once.
+v3.2 (always invested, no brakes) was the user's choice for one session on 2026-10-01; that
+evening the user asked for "growth with a little bit of brakes", and v3.1 is the default again:
+`sizing_mode="kelly"`, CRASH 0.0, UNKNOWN 0.5, novel 0.5 and `es_trim` 0.5. `sizing_mode="full"` with all
+multipliers at 1.0 reproduces v3.2.
 
 ## Model status (manifest of 2026-09-26)
 
