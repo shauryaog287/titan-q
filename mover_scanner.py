@@ -21,7 +21,9 @@ Each mover is matched to today's NSE filings for that stock (one announcements r
   hour.
 
 INFORMATION ONLY. Whether news-backed jumps keep going and no-news jumps reverse is tested in
-NJ1/NJ2 (pre-registered) before anything trades on it.
+NJ1/NJ2 (pre-registered) before anything trades on it. If the NJ1b confirmation passed
+(reports/no_news_fade.json), up-jumps with no non-routine NSE filing since 15:30 on the
+previous trading day are tagged "historically tends to fade".
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -73,32 +75,64 @@ def session_fraction(now: datetime) -> float:
     return min(1.0, max(1 / 375, (now - start).total_seconds() / (375 * 60)))
 
 
+def nj1b_confirmed() -> bool:
+    """True only if the pre-registered NJ1b confirmation (reports/no_news_fade.json) passed."""
+    try:
+        with open(os.path.join(PROJECT_DIR, "reports", "no_news_fade.json"), encoding="ascii") as f:
+            return bool(json.load(f).get("confirmed"))
+    except (OSError, ValueError):
+        return False
+
+
 class Filings:
-    """Today's NSE announcements, refreshed at most every FILINGS_EVERY seconds."""
+    """NSE announcements since 15:30 on the previous trading day (the NJ1 news window),
+    refreshed at most every FILINGS_EVERY seconds."""
 
     def __init__(self) -> None:
-        self.at, self.by_symbol, self.nse = 0.0, {}, None
+        self.at, self.by_symbol, self.nonroutine, self.nse = 0.0, {}, set(), None
+        self.ok = False                                     # False until one read succeeded
+
+    def refresh(self) -> None:
+        if time.time() - self.at < FILINGS_EVERY:
+            return
+        self.at = time.time()
+        try:
+            from disclosure_radar import NSE, _rows
+            from market_data import Session
+            from news_analyser import ascii_text
+            from news_jumps import ROUTINE
+            self.nse = self.nse or NSE()
+            d = now_ist().date()
+            sess, prev = Session(), d - timedelta(days=1)
+            while not sess.is_trading_day(prev):
+                prev -= timedelta(days=1)
+            since = datetime.combine(prev, CLOSE)
+            rows = _rows(self.nse.json("https://www.nseindia.com/api/corporate-announcements?index=equities"
+                                       f"&from_date={prev:%d-%m-%Y}&to_date={d:%d-%m-%Y}") or [])
+            by: Dict[str, List[str]] = {}
+            nonroutine = set()
+            for r in rows:
+                t = pd.to_datetime(r.get("an_dt"), format="%d-%b-%Y %H:%M:%S", errors="coerce")
+                if pd.isna(t) or t.to_pydatetime() < since:
+                    continue
+                by.setdefault(r.get("symbol"), []).append(
+                    ascii_text(f"{(r.get('an_dt') or '')[12:17]} {r.get('desc', '')}: "
+                               f"{(r.get('attchmntText') or '')[:140]}"))
+                if r.get("desc") not in ROUTINE:
+                    nonroutine.add(r.get("symbol"))
+            self.by_symbol, self.nonroutine, self.ok = by, nonroutine, True
+        except Exception as exc:
+            log.warning("NSE filings not read (%s)", type(exc).__name__)
+            self.nse = None
 
     def get(self, symbol: str) -> List[str]:
-        if time.time() - self.at >= FILINGS_EVERY:
-            self.at = time.time()
-            try:
-                from disclosure_radar import NSE, _rows
-                from news_analyser import ascii_text
-                self.nse = self.nse or NSE()
-                d = now_ist().date()
-                rows = _rows(self.nse.json("https://www.nseindia.com/api/corporate-announcements?index=equities"
-                                           f"&from_date={d:%d-%m-%Y}&to_date={d:%d-%m-%Y}") or [])
-                by: Dict[str, List[str]] = {}
-                for r in rows:
-                    by.setdefault(r.get("symbol"), []).append(
-                        ascii_text(f"{(r.get('an_dt') or '')[12:17]} {r.get('desc', '')}: "
-                                   f"{(r.get('attchmntText') or '')[:140]}"))
-                self.by_symbol = by
-            except Exception as exc:
-                log.warning("NSE filings not read (%s)", type(exc).__name__)
-                self.nse = None
+        self.refresh()
         return self.by_symbol.get(symbol, [])
+
+    def no_news(self, symbol: str) -> bool:
+        """NJ1's definition: no non-routine filing in the window. False if filings are unknown."""
+        self.refresh()
+        return self.ok and symbol not in self.nonroutine
 
 
 _NAMES: Dict[str, str] = {}
@@ -183,6 +217,8 @@ def main() -> None:
     base = baseline(sorted(set(tmap.values())))
     log.info("baseline for %d stocks; scanning until %s", len(base), CLOSE.strftime("%H:%M"))
     filings, reported, sent = Filings(), {}, []
+    fade_tag = nj1b_confirmed()
+    log.info("NJ1b no-news fade tag: %s", "on (confirmed)" if fade_tag else "off (not confirmed)")
     os.makedirs(MOVERS_DIR, exist_ok=True)
     path = os.path.join(MOVERS_DIR, f"movers_{now_ist().date()}.parquet")
     archive: List[Dict] = pd.read_parquet(path).to_dict("records") if os.path.exists(path) else []
@@ -197,6 +233,8 @@ def main() -> None:
                     m["first_seen"] = now_ist().isoformat(timespec="seconds")
                     m["filings"] = " | ".join(filings.get(m["symbol"])[-2:])
                     m["news"] = " | ".join(headlines(m["symbol"]))
+                    # NJ1b: an up-jump with no non-routine filing (headlines do not count, as in the study)
+                    m["nj1b_fade"] = bool(fade_tag and m["move_pct"] > 0 and filings.no_news(m["symbol"]))
                 if movers:
                     archive += movers
                     pd.DataFrame(archive).to_parquet(path + ".partial", index=False)
@@ -206,6 +244,7 @@ def main() -> None:
                         lines = [f"{m['symbol']} {m['move_pct']:+.1f}% ({m['vol_ratio']:.0f}x vol) "
                                  + (f"- FILING {m['filings'][:150]}" if m["filings"] else
                                     f"- NEWS {m['news'][:150]}" if m["news"] else "- no news found")
+                                 + (" [no filing - historically tends to fade (NJ1b)]" if m["nj1b_fade"] else "")
                                  for m in sorted(movers, key=lambda m: -abs(m["move_pct"]))[:6]]
                         if len(movers) > 6:
                             lines.append(f"... and {len(movers) - 6} more")
