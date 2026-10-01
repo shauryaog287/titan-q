@@ -57,6 +57,9 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 | TitanQ_Reddit | every 20 min, 07:05-00:05 | `reddit_collector.py`: official Reddit API if `reddit_credentials.json` exists (new apps need Reddit's approval), else ONE public RSS request per run, rotating over 3 subreddits; mentions and tone per stock. No disguised scraping. Observe only. Replaces the Selenium scraper `social_media_scanner.py`. |
 | TitanQ_VPN_Switch | every 2 min, at logon, on each network connect | `vpn_switch.py` (pythonw, no window). On `Mayo Students-M`, if Yahoo/Angel/NSE are intercepted and the internet is up: **Proton VPN first** (`proton_connect.ps1`, UI Automation by element id; connects in ~30 s as WireGuard over TCP; its kill switch is OFF and must stay off), then X-VPN as the fallback (`xvpn_connect.ps1`), one VPN at a time, then an alert. If there is no internet (the night shutdown) it waits. On `Anjali - RES` it disconnects Proton and closes X-VPN. Cloudflare WARP cannot connect on the school Wi-Fi (tested 2026-10-01). Everything runs on the laptop: no phone hotspot, no cloud server (the user's choice). |
 | TitanQ_Movers | 09:12 Mon-Fri (watchdog every 30 min) | `mover_scanner.py`: every minute over about 2,700 stocks (Angel latest prices), it flags moves of 5% or more on 3x or more volume (in steps of 5%), attaches today's NSE filing or news (a targeted Google News search when the archive has nothing), sends phone alerts (max 20/h) and archives to `data/movers/`. Filings count from 15:30 on the previous trading day. If NJ1b is confirmed (`reports/no_news_fade.json`), up-jumps with no non-routine filing are tagged "historically tends to fade". Information only. |
+| TitanQ_Fundamentals | 18:30 daily | `fundamentals.py`: NSE quarterly results for the 1,009 liquid tickers. It builds each stock's filing index, then reads the XBRL figures (revenue, profit, EPS, capital; consolidated preferred, first broadcast kept) into `data/fundamentals/quarterly.parquet`. Resumable, single instance, waits out network outages. Raw material for future earnings studies. |
+| TitanQ_LLM_Backfill | 21:40 daily | `llm_backfill.py`: the local AI labels historical filings for EV1 (`reports/preregistration_ev1_ai_filings.md`); 41,437 in development, about 1.3 s each. Resumable and single instance. Runs only on mains power and pauses 09:00-15:45 on weekdays. When development labelling is complete it runs `ev1_research.py` once and sends the decision to the phone. |
+| TitanQ_Weekly_Report | 10:30 Saturday | `weekly_report.py`: `reports/weekly/weekly_<date>.md` plus a phone summary covering the live account vs NIFTY (best and worst holdings), the forward test, NJ1b flags, movers, AI events, VPN and recorder health, and research decisions. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
 `after_download.ps1` is a one-off detached chain, logged to `logs\after_download.log`.
@@ -143,7 +146,11 @@ stale-feed alerts.
     `commodity_research.py`) failed development: 5,571 trades, +0.008% per trade (t 0.68).
     Yahoo's NSE opens match Angel's first 1-minute opens (also on days when the open equals
     the previous close, about 5-10% of days);
-  - SM1 (industry momentum, `sector_momentum.py`, Yahoo industry labels) is in development;
+  - SM1 (industry momentum, `sector_momentum.py`, Yahoo industry labels) failed development:
+    the top 3 industries beat the market by +2.3% a year (t 0.37);
+  - EV1 (filings read by the local AI): pre-registered 2026-10-01, development labelling in
+    progress. The sealed confirmation window (2024-10 to 2026-08) is after the model's
+    release, so its labels cannot know the outcome;
   - M1 and the VPIN gate test are pending the download.
 - Local AI (`llm_reader.py`): Ollama with Qwen 2.5 7B, installed on D: (`D:\Ollama`, models in
   `D:\OllamaModels` via the user variable OLLAMA_MODELS; the C: drive is full). It serves on
