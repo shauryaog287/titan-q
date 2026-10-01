@@ -142,6 +142,12 @@ VARIANTS = {
     "market": {"regime_multipliers": {k: 1.0 for k in
                                       ("BULL", "SIDEWAYS", "HIGH_VOL", "BEAR", "CRASH", "UNKNOWN")},
                "novel_regime_multiplier": 1.0, "es_trim": 1.0, "kelly_fraction": 1.0},
+    # always invested (no Kelly / volatility shrinking, no EVT trim) EXCEPT the crash brake:
+    # CRASH regime -> cash, unknown or novel regime -> half (exploratory, 2026-10-01)
+    "crash_only": {"sizing_mode": "full", "es_trim": 1.0,
+                   "regime_multipliers": {"BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 1.0, "BEAR": 1.0,
+                                          "CRASH": 0.0, "UNKNOWN": 0.5},
+                   "novel_regime_multiplier": 0.5},
     # sizing volatility: EWMA of the basket's daily returns instead of the 252-day
     # window (reports/preregistration_sizing_vol.md; chosen on 2016-2020 only)
     "ewma_vol_21": {"sizing_vol_halflife_days": 21},
