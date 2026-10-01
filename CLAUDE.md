@@ -55,7 +55,7 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 | TitanQ_Preflight | 08:50 Mon-Fri | `alerts.py --preflight`: HTTPS to Yahoo, Angel and NSE (VPN check), mains power, disk space. Phone alert either way. |
 | TitanQ_Trends | 20:40 daily | `trends_collector.py`: Google Trends searches for "<company> share price" (held/planned stocks); daily 90-day snapshot to D: and G:. Observe only. |
 | TitanQ_Reddit | every 20 min, 07:05-00:05 | `reddit_collector.py`: official Reddit API if `reddit_credentials.json` exists (new apps need Reddit's approval), else ONE public RSS request per run, rotating over 3 subreddits; mentions and tone per stock. No disguised scraping. Observe only. Replaces the Selenium scraper `social_media_scanner.py`. |
-| TitanQ_VPN_Switch | every 2 min, at logon, and on each network connect | `vpn_switch.py` (pythonw, no window): starts X-VPN (a Store app) on `Mayo Students-M` and checks Yahoo/Angel/NSE after 90 s, with an alert if they are still blocked; closes X-VPN on `Anjali - RES`. |
+| TitanQ_VPN_Switch | every 2 min, at logon, on each network connect | `vpn_switch.py` (pythonw, no window). On `Mayo Students-M`, if Yahoo/Angel/NSE are intercepted and the internet is up, it starts X-VPN and presses its Connect button via UI Automation (`xvpn_connect.ps1`), verifies after 45 s, retries once, then alerts. If there is no internet (the night shutdown) it waits. On `Anjali - RES` it closes X-VPN. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
 `after_download.ps1` is a one-off detached chain, logged to `logs\after_download.log`.

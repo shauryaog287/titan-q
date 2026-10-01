@@ -8,15 +8,18 @@ always has a connection that does not intercept HTTPS.
                                                          2 minutes and whenever a network connects)
 
 - On "Mayo Students-M" (school Wi-Fi; it intercepts HTTPS to Yahoo, Angel, NSE and GitHub,
-  and is switched off from about 22:45 until early morning): start X-VPN if it is not
-  running, then check after 90 s that Yahoo/Angel/NSE pass a certificate-verified
-  connection; if not, send a phone alert (X-VPN may need its "connect on launch" setting,
-  or a manual Connect).
+  and carries no traffic at all from about 22:45 until early morning):
+  - if Yahoo/Angel/NSE pass a certificate-verified connection, nothing to do;
+  - if there is no internet at all (the night shutdown), wait;
+  - otherwise start X-VPN if needed, press its Connect button (xvpn_connect.ps1, Windows
+    UI Automation; X-VPN has no command line), wait 45 s and check again; one retry, then
+    a phone alert.
 - On "Anjali - RES" (no interception): close X-VPN if it is running.
 - Any other network: leave X-VPN as it is.
 
 X-VPN is a Microsoft Store app; it is started through its app ID and stopped by ending its
-processes (xvpn.exe and its own SystrayComponent.exe). Log: logs\\vpn_switch.log.
+processes (xvpn.exe and its own SystrayComponent.exe). Tested 2026-10-01: pressing Connect
+moved the exit to Singapore within ~40 s. Log: logs\\vpn_switch.log.
 """
 
 from __future__ import annotations
@@ -93,22 +96,45 @@ def alert(title: str, message: str) -> None:
         pass
 
 
+def internet_up() -> bool:
+    """Any internet at all (the school Wi-Fi carries none from about 22:45 to the morning)."""
+    import socket
+    try:
+        socket.create_connection(("www.google.com", 443), timeout=10).close()
+        return True
+    except OSError:
+        return False
+
+
+def press_connect() -> str:
+    """X-VPN has no command line: press its Connect button via UI Automation."""
+    return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                os.path.join(PROJECT_DIR, "xvpn_connect.ps1")]).strip()
+
+
 def main() -> None:
     ssid = current_ssid()
     running = xvpn_running()
     if ssid == SCHOOL_SSID:
-        if not running:
-            log.info("on %s without X-VPN: starting it", ssid)
-            start_xvpn()
-            time.sleep(90)
+        bad = blocked_hosts()
+        if not bad:
+            return                                    # VPN already working (or not needed)
+        if not internet_up():
+            return                                    # network flow off (night): nothing to do
+        log.info("on %s, finance sites blocked (%s): connecting X-VPN", ssid, ", ".join(bad))
+        for attempt in (1, 2):
+            if not xvpn_running():
+                start_xvpn()
+                time.sleep(15)
+            log.info("X-VPN: %s", press_connect() or "no answer from the UI helper")
+            time.sleep(45)                            # the tunnel takes ~30-45 s to come up
             bad = blocked_hosts()
-            if bad:
-                log.warning("X-VPN started but still blocked: %s", ", ".join(bad))
-                alert("VPN not connected", "On school Wi-Fi X-VPN was opened but finance sites are still "
-                      "blocked (" + ", ".join(bad) + "). Open X-VPN and press Connect, and turn on its "
-                      "auto-connect setting.")
-            else:
-                log.info("X-VPN up: Yahoo, Angel and NSE pass")
+            if not bad:
+                log.info("X-VPN connected: Yahoo, Angel and NSE pass (attempt %d)", attempt)
+                return
+        log.warning("X-VPN still not working: %s", ", ".join(bad))
+        alert("VPN not connected", "On school Wi-Fi, X-VPN was opened and Connect pressed twice, but "
+              "finance sites are still blocked (" + ", ".join(bad) + "). Check X-VPN.")
     elif ssid == HOME_SSID:
         if running:
             log.info("on %s: closing X-VPN (not needed here)", ssid)
