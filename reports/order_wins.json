@@ -1,0 +1,59 @@
+{
+  "development": {
+    "primary": {
+      "events": 86,
+      "stocks": 27,
+      "months": 33,
+      "mean_excess": -0.030119639036395498,
+      "median_excess": -0.024628391851878942,
+      "month_t": -2.03910899415489,
+      "hit_rate": 0.37209302325581395
+    },
+    "5 days": {
+      "events": 86,
+      "stocks": 27,
+      "months": 33,
+      "mean_excess": -0.018438874881568614,
+      "median_excess": -0.017440021541389534,
+      "month_t": -2.8009634263425327,
+      "hit_rate": 0.313953488372093
+    },
+    "60 days": {
+      "events": 86,
+      "stocks": 27,
+      "months": 33,
+      "mean_excess": -0.03566098427396044,
+      "median_excess": -0.008905512561641332,
+      "month_t": -1.694789053507788,
+      "hit_rate": 0.47674418604651164
+    },
+    "stated value above median": {
+      "events": 30,
+      "stocks": 11,
+      "months": 19,
+      "mean_excess": -0.05013294768985722,
+      "median_excess": -0.02293459587196141,
+      "month_t": -1.5692223430540384,
+      "hit_rate": 0.36666666666666664
+    },
+    "stated value at or below median": {
+      "events": 7,
+      "stocks": 5,
+      "months": 4,
+      "mean_excess": -0.01798916516395272,
+      "median_excess": -0.018977110208046186,
+      "month_t": -0.0072674299295789856,
+      "hit_rate": 0.42857142857142855
+    },
+    "government-owned / defence names": {
+      "events": 15,
+      "stocks": 3,
+      "months": 15,
+      "mean_excess": 0.0025079836093769747,
+      "median_excess": 0.01946321637556674,
+      "month_t": 0.09594685149876198,
+      "hit_rate": 0.5333333333333333
+    }
+  },
+  "qualifies": false
+}
