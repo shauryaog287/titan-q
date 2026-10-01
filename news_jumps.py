@@ -43,7 +43,9 @@ def news_times(ticker: Dict[str, str]) -> Dict[str, np.ndarray]:
     for year in sorted(os.listdir(ANN_DIR)):
         for f in sorted(os.listdir(os.path.join(ANN_DIR, year))):
             if f.endswith(".parquet"):
-                parts.append(pd.read_parquet(os.path.join(ANN_DIR, year, f), columns=["symbol", "desc", "an_dt"]))
+                df = pd.read_parquet(os.path.join(ANN_DIR, year, f))
+                if len(df) and {"symbol", "desc", "an_dt"} <= set(df.columns):   # empty days have no columns
+                    parts.append(df[["symbol", "desc", "an_dt"]])
     a = pd.concat(parts, ignore_index=True)
     a = a[~a["desc"].isin(ROUTINE)]
     a["t"] = pd.to_datetime(a["an_dt"], format="%d-%b-%Y %H:%M:%S", errors="coerce")
@@ -125,10 +127,41 @@ def block(px, vol, times, lo, hi, title) -> Tuple[Dict, List[str]]:
     return res, L
 
 
+def nonews_confirmation() -> None:
+    """reports/preregistration_no_news_fade.md (NJ1b): one run on 2021-01 to 2026-08."""
+    from universe import load_universe
+    from whole_market_research import load_panels
+    uni = load_universe()
+    ticker = dict(zip(uni["symbol"].str.replace("-EQ", "", regex=False), uni["yahoo"]))
+    times = news_times(ticker)
+    px, vol = load_panels()
+    ev = events(px, vol, times, *TEST)
+    s = summary(ev[~ev["news"]], 5, cost=0.0) if len(ev) else summary(ev)
+    s20 = summary(ev[~ev["news"]], 20, cost=0.0) if len(ev) else summary(ev)
+    ok = s["events"] > 0 and s["mean"] < 0 and s["t"] <= -2.0
+    L = ["# NJ1b: do no-news jumps fade? Confirmation on 2021-01 to 2026-08 (run once)", "",
+         "Implements reports/preregistration_no_news_fade.md. Excess vs the equal-weight liquid universe, "
+         "no cost (an avoid flag, not a trade).", "",
+         "| No-news jumps | Events | Mean excess | Date-clustered t | Share positive |", "|---|---|---|---|---|",
+         f"| **5 days (decisive)** | {s['events']:,} | {100 * s['mean']:+.2f}% | {s['t']:+.2f} | {100 * s['hit']:.1f}% |",
+         f"| 20 days | {s20['events']:,} | {100 * s20['mean']:+.2f}% | {s20['t']:+.2f} | {100 * s20['hit']:.1f}% |", "",
+         "Rule: mean 5-day excess < 0 and t <= -2.0.", "",
+         f"**Decision: {'confirmed; tag no-news jumps in the mover scanner and never buy them' if ok else 'not confirmed; nothing changes'}.**", ""]
+    with open(os.path.join(REPORT_DIR, "no_news_fade.md"), "w", encoding="ascii") as f:
+        f.write("\n".join(L) + "\n")
+    with open(os.path.join(REPORT_DIR, "no_news_fade.json"), "w", encoding="ascii") as f:
+        json.dump({"test_5d": s, "test_20d": s20, "confirmed": ok}, f, indent=2, default=str)
+    print("\n".join(L))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reveal-test", action="store_true")
+    ap.add_argument("--nonews-confirmation", action="store_true")
     a = ap.parse_args()
+    if a.nonews_confirmation:
+        nonews_confirmation()
+        return
     from universe import load_universe
     from whole_market_research import load_panels
     uni = load_universe()

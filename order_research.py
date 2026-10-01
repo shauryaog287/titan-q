@@ -81,7 +81,9 @@ def load_order_wins() -> pd.DataFrame:
     for year in sorted(os.listdir(ANN_DIR)):
         for f in sorted(os.listdir(os.path.join(ANN_DIR, year))):
             if f.endswith(".parquet"):
-                parts.append(pd.read_parquet(os.path.join(ANN_DIR, year, f)))
+                df = pd.read_parquet(os.path.join(ANN_DIR, year, f))
+                if len(df) and "desc" in df.columns:                # empty days have no columns
+                    parts.append(df)
     a = pd.concat(parts, ignore_index=True)
     text = a["desc"].fillna("") + " " + a["text"].fillna("")
     hit = text.str.contains(ORDER) & ~text.str.contains(EXCLUDE) & \
