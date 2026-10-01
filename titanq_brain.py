@@ -559,8 +559,12 @@ class Rebalancer:
 
     def plan(self, target_weights: Dict[str, float], positions: Dict[str, int],
              prices: Dict[str, Optional[float]], cash: float, equity: float, now: datetime,
-             toxicity: Dict[str, Optional[float]]) -> Tuple[List[PlannedOrder], List[str]]:
+             toxicity: Dict[str, Optional[float]],
+             no_buy: Optional[Dict[str, str]] = None) -> Tuple[List[PlannedOrder], List[str]]:
+        """no_buy: symbol -> reason; buys of these are held back (sells and exits still go),
+        e.g. the NJ1b rule for stocks that jumped without news."""
         cfg = self.cfg
+        no_buy = no_buy or {}
         sells: List[PlannedOrder] = []
         buys: List[PlannedOrder] = []
         notes: List[str] = []
@@ -591,6 +595,9 @@ class Rebalancer:
             else:
                 if late:
                     notes.append(f"{s}: buy of {diff} held back (last {cfg.no_new_risk_last_minutes} min)")
+                    continue
+                if s in no_buy:
+                    notes.append(f"{s}: buy of {diff} held back ({no_buy[s]})")
                     continue
                 tox = toxicity.get(s)
                 if tox is not None and tox > cfg.toxicity_threshold:
@@ -661,8 +668,13 @@ def _test_rebalancer_rules() -> None:
     orders, notes = Rebalancer(cfg).plan({"D": 0.5}, {"A": 100}, prices, 20_000, 520_000, now, {})
     buy = [o for o in orders if o.side == "BUY"][0]
     assert orders[0].side == "SELL" and buy.qty * buy.price <= 20_000 + 100 * 100
+    # a no-buy list (NJ1b) holds back buys of those stocks only; their sells still go
+    orders, notes = Rebalancer(cfg).plan({"A": 0.2, "B": 0.1}, {"C": 3}, prices, 500_000, 500_000, now, {},
+                                         no_buy={"A": "NJ1b: no-news jump on 2026-09-25", "C": "NJ1b"})
+    assert {(o.symbol, o.side) for o in orders} == {("B", "BUY"), ("C", "SELL")}, orders
+    assert any("NJ1b" in n and n.startswith("A:") for n in notes), notes
     print("[ok] rebalancer: sizes from equity, no-trade band, full exits always allowed, toxic "
-          "flow and the last minutes block buys only, cash caps buys, sells go first")
+          "flow, the last minutes and the NJ1b no-buy list block buys only, cash caps buys, sells go first")
 
 
 def _test_toxicity_detects_one_sided_flow() -> None:

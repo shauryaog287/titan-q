@@ -129,8 +129,14 @@ stale-feed alerts.
     test (2021-2026: -1.42%, hit rate 41%). It is not used;
   - INS2 (pledge invocations) failed development;
   - NJ1 (news-backed jumps keep rising) failed development (5-day net -0.25%, t -1.07). Its
-    development data showed no-news jumps fading (t -6.4), so NJ1b re-registers that and
-    confirms it once on 2021-2026 (`news_jumps.py --nonews-confirmation`);
+    development data showed no-news jumps fading (t -6.4), so NJ1b re-registered that.
+  - **NJ1b CONFIRMED** (2026-10-01, on unseen 2021-01 to 2026-08): 13,847 jumps of +5% on 3x
+    volume with no non-routine NSE filing; 5-day excess -0.26% (t -3.99, 40% positive). The
+    first finding to pass a sealed test. It is an AVOID rule, not a trade: the mover scanner
+    tags such jumps and adds them to `data/movers/nj1b_avoid.json`, and the trading loop holds
+    back buys of those stocks on the jump day and the next 5 trading days
+    (`main_trading_loop.nj1b_no_buy`, `Rebalancer.plan(no_buy=...)`). Not in the backtests
+    (it rarely touches the 50 large caps);
   - ORD1 (order-win announcements drift up) failed development: 86 events, 20-day net
     -3.01% (t -2.04);
   - CM1 (commodity-linked stocks drift after overnight crude/gold moves,

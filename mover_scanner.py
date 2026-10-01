@@ -75,6 +75,27 @@ def session_fraction(now: datetime) -> float:
     return min(1.0, max(1 / 375, (now - start).total_seconds() / (375 * 60)))
 
 
+NJ1B_AVOID = os.path.join(MOVERS_DIR, "nj1b_avoid.json")
+
+
+def record_nj1b(yahoo_symbols: List[str]) -> None:
+    """Add today's no-news jumps to the no-buy list the trading loop reads (entries older
+    than 14 days are dropped; the loop itself counts the 5 trading days)."""
+    today = now_ist().date()
+    try:
+        with open(NJ1B_AVOID, encoding="ascii") as f:
+            jumps = json.load(f)
+    except (OSError, ValueError):
+        jumps = {}
+    jumps = {s: d for s, d in jumps.items() if (today - datetime.strptime(d, "%Y-%m-%d").date()).days <= 14}
+    for s in yahoo_symbols:
+        jumps[s] = str(today)
+    os.makedirs(MOVERS_DIR, exist_ok=True)
+    with open(NJ1B_AVOID + ".partial", "w", encoding="ascii") as f:
+        json.dump(jumps, f, indent=1, sort_keys=True)
+    os.replace(NJ1B_AVOID + ".partial", NJ1B_AVOID)
+
+
 def nj1b_confirmed() -> bool:
     """True only if the pre-registered NJ1b confirmation (reports/no_news_fade.json) passed."""
     try:
@@ -236,6 +257,10 @@ def main() -> None:
                     # NJ1b: an up-jump with no non-routine filing (headlines do not count, as in the study)
                     m["nj1b_fade"] = bool(fade_tag and m["move_pct"] > 0 and filings.no_news(m["symbol"]))
                     m["ai"] = ""
+                fades = [m["yahoo"] for m in movers if m["nj1b_fade"]]
+                if fades:
+                    record_nj1b(fades)
+                    log.info("NJ1b no-buy list: added %s", ", ".join(fades))
                 # local AI reading of the filing (or headline) behind the biggest movers, if the model runs
                 try:
                     from llm_reader import available, describe, read_item

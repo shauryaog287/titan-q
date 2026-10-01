@@ -182,6 +182,34 @@ def day_open_equity(day: str, equity: float) -> float:
     return equity
 
 
+NJ1B_AVOID = os.path.join(PROJECT_DIR, "data", "movers", "nj1b_avoid.json")
+NJ1B_DAYS = 5
+
+
+def nj1b_no_buy(session: Session, today: date) -> Dict[str, str]:
+    """reports/preregistration_no_news_fade.md, confirmed on 2021-2026 data (2026-10-01): no
+    buys of a stock on the day it jumped without news or for the next 5 trading days. The
+    mover scanner keeps the list (data/movers/nj1b_avoid.json: Yahoo symbol -> jump date)."""
+    try:
+        with open(NJ1B_AVOID, encoding="ascii") as f:
+            jumps = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out: Dict[str, str] = {}
+    for sym, d in jumps.items():
+        try:
+            day = date.fromisoformat(d)
+        except ValueError:
+            continue
+        n, x = 0, day
+        while x < today and n <= NJ1B_DAYS:
+            x += timedelta(days=1)
+            n += session.is_trading_day(x)
+        if day <= today and n <= NJ1B_DAYS:
+            out[sym] = f"NJ1b: jumped without news on {d}"
+    return out
+
+
 def news_overlay(symbols) -> Dict[str, Dict]:
     """Headline tone (news_analyser.py, FinBERT) of the last 24 h for the given stocks.
     OBSERVE mode like the radar: logged and exported, never used to change a trade, until
@@ -389,7 +417,7 @@ class Orchestrator:
         prices = {s: self.feed.last_price(s) for s in self._symbols()}
         orders, notes = self.rebalancer.plan(
             self.ctx.target_weights, positions, prices, self.broker.capital,
-            self.broker.equity(), now, self.toxicity)
+            self.broker.equity(), now, self.toxicity, no_buy=nj1b_no_buy(self.session, now.date()))
         for n in notes:
             if n not in self._seen_notes:
                 self._seen_notes.add(n)
