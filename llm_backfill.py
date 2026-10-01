@@ -198,6 +198,25 @@ def run(window: str) -> None:
         save(path, rows)
     keep_awake(False)
     log.info("%s window finished: %d labelled this run", window, n)
+    left = len(in_scope(window)) - len(pd.read_parquet(path)) if os.path.exists(path) else -1
+    report = os.path.join(PROJECT_DIR, "reports", "ev1_ai_filings.md")
+    if window == "dev" and left <= 0 and not os.path.exists(report):
+        # the pre-registered development decision is mechanical: run it once and tell the user
+        import re
+        import subprocess
+        import sys
+        subprocess.run([sys.executable, os.path.join(PROJECT_DIR, "ev1_research.py")], cwd=PROJECT_DIR,
+                       capture_output=True, creationflags=0x08000000)
+        if os.path.exists(report):
+            with open(report, encoding="ascii") as f:
+                dec = re.findall(r"\*\*Decision: ([^*]+)\*\*", f.read())
+            log.info("EV1 development: %s", dec[-1] if dec else "no decision line")
+            try:
+                from alerts import send
+                send("EV1 development result", (dec[-1] if dec else "see reports/ev1_ai_filings.md")
+                     + " (reports/ev1_ai_filings.md)", priority="default", tags="microscope", repeat_minutes=0)
+            except Exception:
+                pass
 
 
 def main() -> None:
@@ -209,6 +228,10 @@ def main() -> None:
         s = in_scope(a.window)
         print(f"{a.window}: {len(s):,} filings in scope")
         print(s["desc"].value_counts().to_string())
+        return
+    from procs import other_instance_running
+    if other_instance_running("llm_backfill.py"):
+        log.info("another llm_backfill.py is running; exiting")
         return
     run(a.window)
 

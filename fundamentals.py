@@ -224,23 +224,8 @@ def report() -> None:
               round(q["net_profit"].notna().mean(), 3), "| consolidated:", round(q["consolidated"].mean(), 3))
 
 
-def other_instance_running() -> bool:
-    """Another fundamentals.py run (the nightly task can meet a long manual run). The venv's
-    python.exe is a launcher with a child process, so both this process and its parent are ignored."""
-    import subprocess
-    out = subprocess.run(["powershell", "-NoProfile", "-Command",
-                          "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
-                          "ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"],
-                         capture_output=True, text=True, creationflags=0x08000000).stdout
-    mine = {os.getpid(), os.getppid()}
-    for line in out.splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        if pid.isdigit() and int(pid) not in mine and "fundamentals.py" in cmd and "--report" not in cmd:
-            return True
-    return False
-
-
 def main() -> None:
+    from procs import other_instance_running
     ap = argparse.ArgumentParser()
     ap.add_argument("--index", action="store_true")
     ap.add_argument("--report", action="store_true")
@@ -248,7 +233,7 @@ def main() -> None:
     if a.report:
         report()
         return
-    if other_instance_running():
+    if other_instance_running("fundamentals.py"):
         log.info("another fundamentals.py is running; exiting")
         return
     os.makedirs(FUND_DIR, exist_ok=True)
