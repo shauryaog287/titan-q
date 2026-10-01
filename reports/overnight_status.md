@@ -227,3 +227,36 @@ GitHub.
 - **Pushed:** all pending commits.
 - **Background downloads:** FO participant 2,100/2,647 days, with 627 failed during outages
   to be re-fetched; Angel minute research set 13,459/22,731.
+
+## 2026-10-01, evening (18:30-21:00 IST)
+
+- **Research results** (all pre-registered; development decisions applied mechanically):
+
+  | Study | Question | Development result | Decision |
+  |---|---|---|---|
+  | ORD1 | Do order-win announcements drift up? | 86 events 2017-2020, 20-day net -3.01% (t -2.04) | Not adopted; test sealed |
+  | CM1 | Do oil and gold stocks drift after overnight crude or gold moves? | 5,571 trades, +0.008% per trade (t 0.68) | Not adopted; test sealed |
+  | SM1 | Do the strongest industries keep winning? | Top 3 industries +2.3% a year over the market (t 0.37) | Not adopted; test sealed |
+  | **NJ1b** | Do jumps with no news fade? | Confirmed on unseen 2021-2026 data: 13,847 jumps, 5-day excess -0.26% (t -3.99) | **Confirmed** |
+
+  - NJ1b is the first finding to pass a sealed test. It is an avoid rule: the mover scanner
+    tags these jumps, and the trading loop will not buy such a stock on the jump day or for
+    the next 5 trading days.
+- **Data check:** Yahoo's NSE opens match Angel's first 1-minute opens. On about 5-10% of
+  days the open equals the previous close, and that is real, not a data error.
+- **Local AI:**
+  - Ollama is installed to `D:\Ollama` (2.8 GB), with models in `D:\OllamaModels` and none on
+    C:. It runs on the RTX 3050 (CUDA). The qwen2.5:7b download is in progress.
+  - News alerts and mover alerts get an "AI:" line once the model is ready. Everything works
+    without it.
+  - C: free space fell from 22.5 to 14.8 GB. The cause is Windows' page file growing to
+    20 GB under memory load, not Ollama; it shrinks after a restart.
+- **Network:**
+  - The laptop went into standby 18:56-19:54 (taken off the charger) and again 20:05-20:21.
+  - On Mayo, X-VPN was stuck on its loading screen from 14:40 to 15:41, so the price feed
+    was down for the last hour of the session. It also dropped briefly at 19:54, 20:00 and
+    20:21. The switcher reconnected it each time.
+  - A second VPN app as a fallback (for example Cloudflare WARP) would cover the loading-
+    screen case; that is the user's decision.
+- **Minute history:** the downloader is working, not stuck. It wrote 4,564 files between
+  15:50 and 19:00. Its progress line only looked frozen because it waits on the oldest chunk.
