@@ -83,8 +83,15 @@ class RateLimiter:
 
 
 def in_quiet_hours(now: datetime) -> bool:
-    """True during the trading window, when the downloader must pause."""
-    return now.weekday() < 5 and dtime(8, 55) <= now.time() <= dtime(15, 50)
+    """True during the trading window of a trading day, when the downloader must pause
+    (NSE holidays are not paused since 2026-10-01: no live session competes then)."""
+    if not (now.weekday() < 5 and dtime(8, 55) <= now.time() <= dtime(15, 50)):
+        return False
+    try:
+        from market_data import Session
+        return Session().is_trading_day(now.date())
+    except Exception:
+        return True
 
 
 def chunks(start: date, end: date) -> List[Tuple[date, date]]:
