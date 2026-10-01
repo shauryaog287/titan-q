@@ -56,7 +56,7 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 | TitanQ_Trends | 20:40 daily | `trends_collector.py`: Google Trends searches for "<company> share price" (held/planned stocks); daily 90-day snapshot to D: and G:. Observe only. |
 | TitanQ_Reddit | every 20 min, 07:05-00:05 | `reddit_collector.py`: official Reddit API if `reddit_credentials.json` exists (new apps need Reddit's approval), else ONE public RSS request per run, rotating over 3 subreddits; mentions and tone per stock. No disguised scraping. Observe only. Replaces the Selenium scraper `social_media_scanner.py`. |
 | TitanQ_VPN_Switch | every 2 min, at logon, on each network connect | `vpn_switch.py` (pythonw, no window). On `Mayo Students-M`, if Yahoo/Angel/NSE are intercepted and the internet is up, it starts X-VPN and presses its Connect button via UI Automation (`xvpn_connect.ps1`), verifies after 45 s, retries once, then alerts. If there is no internet (the night shutdown) it waits. On `Anjali - RES` it closes X-VPN. |
-| TitanQ_Movers | 09:12 Mon-Fri (watchdog every 30 min) | `mover_scanner.py`: every minute over about 2,700 stocks (Angel latest prices), it flags moves of 5% or more on 3x or more volume (in steps of 5%), attaches today's NSE filing or news (a targeted Google News search when the archive has nothing), sends phone alerts (max 20/h) and archives to `data/movers/`. Information only, pending NJ1/NJ2. |
+| TitanQ_Movers | 09:12 Mon-Fri (watchdog every 30 min) | `mover_scanner.py`: every minute over about 2,700 stocks (Angel latest prices), it flags moves of 5% or more on 3x or more volume (in steps of 5%), attaches today's NSE filing or news (a targeted Google News search when the archive has nothing), sends phone alerts (max 20/h) and archives to `data/movers/`. Filings count from 15:30 on the previous trading day. If NJ1b is confirmed (`reports/no_news_fade.json`), up-jumps with no non-routine filing are tagged "historically tends to fade". Information only. |
 | TitanQ_Drive_Backup | 10:00 Saturday | `backup_to_drive.py`: minute history, one file per symbol; daily data in one file; Yahoo sessions -> `G:\My Drive\Titan-Q_History`. Never deletes. |
 
 `after_download.ps1` is a one-off detached chain, logged to `logs\after_download.log`.
@@ -127,7 +127,23 @@ stale-feed alerts.
   - INS1 (insider open-market buys, SEBI PIT disclosures from NSE, `insider_research.py`)
     passed development (2016-2020: +2.28% net excess over 60 days, t 2.23) but failed its
     test (2021-2026: -1.42%, hit rate 41%). It is not used;
+  - INS2 (pledge invocations) failed development;
+  - NJ1 (news-backed jumps keep rising) failed development (5-day net -0.25%, t -1.07). Its
+    development data showed no-news jumps fading (t -6.4), so NJ1b re-registers that and
+    confirms it once on 2021-2026 (`news_jumps.py --nonews-confirmation`);
+  - ORD1 (order-win announcements drift up) failed development: 86 events, 20-day net
+    -3.01% (t -2.04);
+  - CM1 (commodity-linked stocks drift after overnight crude/gold moves,
+    `commodity_research.py`) failed development: 5,571 trades, +0.008% per trade (t 0.68).
+    Yahoo's NSE opens match Angel's first 1-minute opens (also on days when the open equals
+    the previous close, about 5-10% of days);
+  - SM1 (industry momentum, `sector_momentum.py`, Yahoo industry labels) is in development;
   - M1 and the VPIN gate test are pending the download.
+- Local AI (`llm_reader.py`): Ollama with Qwen 2.5 7B, installed on D: (`D:\Ollama`, models in
+  `D:\OllamaModels` via the user variable OLLAMA_MODELS; the C: drive is full). It serves on
+  127.0.0.1:11434 only. `news_watch.py` has it read our stocks' new items before alerting and
+  the rest of the day's tagged items in spare time (`data/events/`); `mover_scanner.py` has it
+  read the filing behind the 3 biggest new movers. Observe only; everything works without it.
 - Insider trades: NSE's PIT API (Reg 7) has returned nothing since about 2026-05.`disclosure_radar.py` therefore also collects SAST Reg 29 substantial-holding filings
   (buyers and sellers crossing 5%, promoters flagged; working as of 2026-10-01) and flags
   open-market ones (observe only).

@@ -5,7 +5,7 @@ A local AI analyst: reads each new NSE filing and headline about our stocks with
 model running on this laptop (Ollama + Qwen 2.5 7B, everything on D:) and turns it into a
 structured event: what happened, good or bad, how material, the rupee value if stated.
 
-    D:\\trader_env\\Scripts\\python.exe llm_reader.py             read new items (run by news_watch.py / on demand)
+    D:\\trader_env\\Scripts\\python.exe llm_reader.py             read new items (news_watch.py does this every cycle)
     D:\\trader_env\\Scripts\\python.exe llm_reader.py --report    today's events, most material first
     D:\\trader_env\\Scripts\\python.exe llm_reader.py --test      read three sample items
 
@@ -103,8 +103,45 @@ def events_file(d) -> str:
     return os.path.join(EVENTS_DIR, f"events_{d}.parquet")
 
 
-def run_once(max_items: int = 200) -> int:
-    """Read the not-yet-read items of today's news archive that name a stock."""
+def describe(ev: Dict) -> str:
+    """One line for an alert: 'order_win, positive, high, Rs. 1,250 cr: summary'."""
+    val = f", Rs. {ev['value_cr']:,.0f} cr" if ev.get("value_cr") is not None and pd.notna(ev["value_cr"]) else ""
+    return f"{ev['event_type']}, {ev['direction']}, {ev['materiality']}{val}: {ev['summary']}"
+
+
+def _save(rows: List[Dict]) -> None:
+    path = events_file(now_ist().date())
+    done = pd.read_parquet(path) if os.path.exists(path) else pd.DataFrame()
+    os.makedirs(EVENTS_DIR, exist_ok=True)
+    out = pd.concat([done, pd.DataFrame(rows)], ignore_index=True) if len(done) else pd.DataFrame(rows)
+    out = out.drop_duplicates("key", keep="first")
+    out.to_parquet(path + ".partial", index=False)
+    os.replace(path + ".partial", path)
+
+
+def read_rows(rows: List[Dict], budget_s: float = 90.0) -> Dict[str, Dict]:
+    """Read news rows (dicts with key, title, summary, symbols, source, first_seen) now, within
+    a time budget; saves them to today's events file and returns {key: event}."""
+    t0, out, save = time.time(), {}, []
+    for r in rows:
+        if time.time() - t0 > budget_s:
+            break
+        ev = read_item(f"{r['title']}. {r.get('summary') or ''}",
+                       timeout=min(120.0, max(10.0, budget_s - (time.time() - t0))))
+        if ev is None:
+            continue
+        out[r["key"]] = ev
+        save.append({"key": r["key"], "symbols": r.get("symbols", ""), "source": r.get("source", ""),
+                     "title": r["title"], "first_seen": r.get("first_seen", ""),
+                     "read_at": now_ist().isoformat(timespec="seconds"), **ev})
+    if save:
+        _save(save)
+    return out
+
+
+def run_once(max_items: int = 200, budget_s: Optional[float] = None) -> int:
+    """Read the not-yet-read items of today's news archive that name a stock (all stocks,
+    oldest first), stopping after budget_s seconds if given."""
     from news_analyser import day_file
     if not available():
         log.warning("Ollama or %s not available; nothing read", MODEL)
@@ -118,20 +155,9 @@ def run_once(max_items: int = 200) -> int:
     done = pd.read_parquet(path) if os.path.exists(path) else pd.DataFrame()
     seen = set(done["key"]) if len(done) else set()
     todo = news[~news["key"].isin(seen)].sort_values("first_seen").head(max_items)
-    rows = []
-    for r in todo.itertuples():
-        ev = read_item(f"{r.title}. {r.summary or ''}")
-        if ev is None:
-            continue
-        rows.append({"key": r.key, "symbols": r.symbols, "source": r.source, "title": r.title,
-                     "first_seen": r.first_seen, "read_at": now_ist().isoformat(timespec="seconds"), **ev})
-    if rows:
-        os.makedirs(EVENTS_DIR, exist_ok=True)
-        out = pd.concat([done, pd.DataFrame(rows)], ignore_index=True) if len(done) else pd.DataFrame(rows)
-        out.to_parquet(path + ".partial", index=False)
-        os.replace(path + ".partial", path)
-    log.info("read %d new items (%d waiting)", len(rows), max(0, len(news) - len(seen) - len(rows)))
-    return len(rows)
+    got = read_rows(todo.to_dict("records"), budget_s=budget_s or 1e9)
+    log.info("read %d new items (%d waiting)", len(got), max(0, len(news) - len(seen) - len(got)))
+    return len(got)
 
 
 def report() -> None:

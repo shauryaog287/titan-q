@@ -20,6 +20,12 @@ news_analyser.py (data/news/news_<date>.parquet, copied to G:); this process is 
 writer while it runs. Alerts: one per stock per cycle (headlines grouped), high priority for
 a strongly negative headline or a sensitive filing, at most 30 an hour, none 22:00-07:00.
 
+Local AI (llm_reader.py, Ollama on this laptop): when the model is running, our stocks' new
+items are read before the alert goes out (the alert shows "AI: event type, direction,
+materiality, value: summary"; a negative, high-materiality reading makes it high priority),
+and the remaining tagged items of the day are read in the time left in each cycle. Without
+the model everything works as before.
+
 Observe only: no trade depends on news (see news_analyser.py).
 """
 
@@ -31,7 +37,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta, time as dtime
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from titanq_config import PROJECT_DIR, UNIVERSE
 from market_data import now_ist
@@ -42,6 +48,7 @@ STOP_AT = dtime(21, 35)
 FAST_SECONDS = 180
 GOOGLE_SECONDS = 600
 MAX_ALERTS_PER_HOUR = 30
+LLM_ALERT_BUDGET = 90.0         # seconds the local model may spend on our stocks' new items per cycle
 SENSITIVE = re.compile(r"auditor|resign|credit rating|default|fraud|insolvency|pledge|sebi|search|raid|"
                        r"forensic|delay|qualified opinion|downgrade|penalty|show cause", re.I)
 LIVE_ACCOUNT = os.path.join(PROJECT_DIR, "paper_account.json")
@@ -97,9 +104,11 @@ class AlertBudget:
         self.sent.append(time.time())
 
 
-def alert_new(rows: List[Dict], stocks: Set[str], budget: AlertBudget) -> int:
+def alert_new(rows: List[Dict], stocks: Set[str], budget: AlertBudget, ai: Optional[Dict[str, Dict]] = None) -> int:
+    """ai: {news key: event} from the local model (llm_reader), shown under each headline."""
     from alerts import send
     from news_analyser import STRONG_NEGATIVE
+    ai = ai or {}
     hour = now_ist().time()
     if hour >= dtime(22, 0) or hour < dtime(7, 0):
         return 0
@@ -116,9 +125,16 @@ def alert_new(rows: List[Dict], stocks: Set[str], budget: AlertBudget) -> int:
         worst = min(r["score"] for r in items)
         filing = any(r["source"] == "NSE filing" for r in items)
         urgent = worst <= STRONG_NEGATIVE or any(r["source"] == "NSE filing" and SENSITIVE.search(r["title"])
-                                                 for r in items)
-        lines = [f"{'+' if r['score'] > 0.3 else '-' if r['score'] < -0.3 else '='}{r['score']:+.2f} "
-                 f"{r['title'][:180]} ({r['source']})" for r in items[:4]]
+                                                 for r in items) or \
+            any(ai.get(r["key"], {}).get("direction") == "negative" and ai[r["key"]].get("materiality") == "high"
+                for r in items)
+        lines = []
+        for r in items[:4]:
+            lines.append(f"{'+' if r['score'] > 0.3 else '-' if r['score'] < -0.3 else '='}{r['score']:+.2f} "
+                         f"{r['title'][:180]} ({r['source']})")
+            if r["key"] in ai:
+                from llm_reader import describe
+                lines.append(f"   AI: {describe(ai[r['key']])}")
         if len(items) > 4:
             lines.append(f"... and {len(items) - 4} more")
         title = f"{s}: {'NSE filing' if filing else 'news'} ({len(items)})"
@@ -137,6 +153,7 @@ def main() -> None:
     from disclosure_radar import NSE
     import disclosure_radar
     from news_analyser import fetch_items, ingest, make_tagger
+    from llm_reader import available as llm_available, read_rows, run_once as run_llm
     disclosure_radar.GAP_SECONDS = 5.0
     stocks = our_stocks()
     tagger = make_tagger(sorted(stocks))
@@ -163,6 +180,8 @@ def main() -> None:
                 nse = None                                   # new session next cycle
             rows = ingest(items, tagger, fixed)
             ours = [r for r in rows if set(str(r.get("symbols") or "").split(",")) & stocks]
+            llm_ok = llm_available()
+            ai = read_rows(ours, budget_s=LLM_ALERT_BUDGET) if llm_ok and ours and not first else {}
             if first:
                 first = False
                 from alerts import send
@@ -171,9 +190,13 @@ def main() -> None:
                      "pushed as they appear.", priority="low", tags="newspaper", repeat_minutes=60)
                 n_alerts = 0
             else:
-                n_alerts = alert_new(rows, stocks, budget)
-            log.info("cycle: %d items, %d new, %d about our stocks, %d alerts", len(items), len(rows),
-                     len(ours), n_alerts)
+                n_alerts = alert_new(rows, stocks, budget, ai)
+            n_read = 0
+            if llm_ok:              # the rest of today's tagged items (any stock), in the time left
+                spare = FAST_SECONDS - (time.time() - t0) - 30
+                n_read = run_llm(max_items=40, budget_s=spare) if spare > 20 else 0
+            log.info("cycle: %d items, %d new, %d about our stocks, %d alerts, AI read %d + %d",
+                     len(items), len(rows), len(ours), n_alerts, len(ai), n_read)
         except Exception as exc:
             log.warning("cycle failed: %s: %s", type(exc).__name__, str(exc)[:200])
         time.sleep(max(10.0, FAST_SECONDS - (time.time() - t0)))

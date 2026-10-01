@@ -235,6 +235,17 @@ def main() -> None:
                     m["news"] = " | ".join(headlines(m["symbol"]))
                     # NJ1b: an up-jump with no non-routine filing (headlines do not count, as in the study)
                     m["nj1b_fade"] = bool(fade_tag and m["move_pct"] > 0 and filings.no_news(m["symbol"]))
+                    m["ai"] = ""
+                # local AI reading of the filing (or headline) behind the biggest movers, if the model runs
+                try:
+                    from llm_reader import available, describe, read_item
+                    if movers and available():
+                        for m in sorted(movers, key=lambda m: -abs(m["move_pct"]))[:3]:
+                            text = m["filings"] or m["news"]
+                            ev = read_item(f"{m['symbol']}: {text}", timeout=30.0) if text else None
+                            m["ai"] = describe(ev) if ev else ""
+                except Exception as exc:
+                    log.warning("AI reading skipped: %s", type(exc).__name__)
                 if movers:
                     archive += movers
                     pd.DataFrame(archive).to_parquet(path + ".partial", index=False)
@@ -245,6 +256,7 @@ def main() -> None:
                                  + (f"- FILING {m['filings'][:150]}" if m["filings"] else
                                     f"- NEWS {m['news'][:150]}" if m["news"] else "- no news found")
                                  + (" [no filing - historically tends to fade (NJ1b)]" if m["nj1b_fade"] else "")
+                                 + (f"\n   AI: {m['ai'][:160]}" if m["ai"] else "")
                                  for m in sorted(movers, key=lambda m: -abs(m["move_pct"]))[:6]]
                         if len(movers) > 6:
                             lines.append(f"... and {len(movers) - 6} more")
