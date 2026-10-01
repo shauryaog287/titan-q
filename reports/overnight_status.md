@@ -260,3 +260,15 @@ GitHub.
     screen case; that is the user's decision.
 - **Minute history:** the downloader is working, not stuck. It wrote 4,564 files between
   15:50 and 19:00. Its progress line only looked frozen because it waits on the oldest chunk.
+
+**2026-10-01, 22:20 IST: paused for a shutdown until Monday 2026-10-05.**
+- **Stopped cleanly:** the EV1 labelling run (600 of 41,437 done), the fundamentals collector,
+  the M1/VPIN chain and the dashboard. All of them resume where they left off.
+- **The minute download had crashed at about 21:20** on a failed login during the VPN
+  switches. That is now fixed, and `TitanQ_Angel_History` restarts it and the M1/VPIN chain
+  at 16:05 each day. It never starts at boot.
+- **Monday:**
+  - the usual 07:30 / 08:50 / 09:10 / 09:12 jobs run with Proton VPN as the primary VPN, the
+    NJ1b no-buy rule and AI lines in alerts;
+  - the labelling and fundamentals jobs catch up at boot but wait until 15:45;
+  - the weekly report missed on Saturday runs at boot.
