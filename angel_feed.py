@@ -343,6 +343,9 @@ class MarketStream:
         self.errors: List[str] = []
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self.short_runs: Dict[str, int] = {}
+        self.relogin_fn = None                   # () -> (jwt, feed_token); set by cmd_record
+        self._last_relogin = 0.0
 
     def _make(self, name: str, chunk: List[str]):
         # max_retry_attempt=0: on an error the SDK just closes, and the supervisor decides
@@ -393,6 +396,26 @@ class MarketStream:
             up = time.time() - t0
             if up >= self.HEALTHY_AFTER:
                 backoff = self.RECONNECT_FIRST
+                self.short_runs[name] = 0
+            else:
+                self.short_runs[name] = self.short_runs.get(name, 0) + 1
+            # After a network switch (2026-10-01 11:30) Angel kept accepting and then dropping
+            # every connection on the old session: three short-lived runs in a row -> log in
+            # again for fresh tokens (at most once per 5 minutes across all connections).
+            if self.short_runs.get(name, 0) >= 3 and self.relogin_fn is not None:
+                with self._lock:
+                    due = time.time() - self._last_relogin > 300
+                    if due:
+                        self._last_relogin = time.time()
+                if due:
+                    try:
+                        jwt, feed = self.relogin_fn()
+                        self.creds = (jwt, self.creds[1], self.creds[2], feed)
+                        log.warning("connection %s: fresh Angel login after %d short runs", name,
+                                    self.short_runs[name])
+                    except Exception as exc:
+                        log.warning("re-login failed: %s", str(exc)[:150])
+                self.short_runs[name] = 0
             self.reconnects[name] += 1
             log.warning("connection %s ended after %.0f s; reconnecting in %.0f s (reconnect %d)",
                         name, up, backoff, self.reconnects[name])
@@ -483,6 +506,11 @@ def cmd_record(until: Optional[str] = None) -> None:
     with open(TOKEN_MAP_FILE, "w", encoding="ascii") as f:                 # token -> Yahoo ticker
         json.dump(dict(zip(eq["token"], eq["yahoo"])), f)
     stream = MarketStream(jwt, creds["api_key"], client, feed, tokens, rec)
+
+    def relogin():
+        _api, new_jwt, new_feed, _client = login(creds)
+        return new_jwt, new_feed
+    stream.relogin_fn = relogin
     stream.start()
     end = (datetime.combine(now_ist().date(), datetime.strptime(until, "%H:%M").time(), IST)
            if until else session.bounds(now_ist().date())[1] + timedelta(minutes=5))
