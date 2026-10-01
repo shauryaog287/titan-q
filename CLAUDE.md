@@ -110,6 +110,8 @@ and pauses all workers together whenever it gets a rate-limit answer. Never rais
   - no single whole-market signal qualified;
   - the composite is in a forward paper test (`forward_test.py`, `reports/forward_test/`);
   - M2 and M3 did not qualify;
+  - FO1 (retail crowding in NIFTY futures) passed development (+1.06%/week, t 2.18) but
+    failed its test (-0.08%/week, t -0.31). DEL1 (delivery %) failed development. Not used.
   - INS1 (insider open-market buys, SEBI PIT disclosures from NSE, `insider_research.py`)
     passed development (2016-2020: +2.28% net excess over 60 days, t 2.23) but failed its
     test (2021-2026: -1.42%, hit rate 41%). It is not used;

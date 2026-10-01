@@ -16,3 +16,15 @@ Rule: normal minus retail-crowded-long >= +0.30%/week, Welch t >= 2.0, >= 40 cro
 
 **Decision: qualifies; reveal the test once.**
 
+## Test 2021-2026 (revealed once)
+
+| Group (vs normal weeks) | Crowded weeks | NIFTY next week, crowded | Normal | Normal minus crowded | Reading |
+|---|---|---|---|---|---|
+| **Primary: retail net long (Client >= 80th pct)** | 115 of 296 | +0.33% | +0.25% | -0.08% (t -0.31) | positive = fade retail |
+| retail net short (Client <= 20th pct) | 41 of 296 | +0.32% | +0.25% | -0.08% (t -0.26) | negative = fade retail |
+| FII net long (>= 80th pct) | 38 of 296 | -0.07% | +0.34% | +0.41% (t +1.31) | negative = follow FII |
+| FII net short (<= 20th pct) | 91 of 296 | +0.33% | +0.34% | +0.01% (t +0.04) | positive = follow FII |
+| retail put/call high (>= 80th pct) | 49 of 296 | -0.04% | +0.44% | +0.48% (t +1.69) | negative = fade fear |
+
+**Test: failed.**
+

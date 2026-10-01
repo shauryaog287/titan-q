@@ -46,5 +46,53 @@
       "t": -1.011242742842172
     }
   },
-  "qualifies": true
+  "qualifies": true,
+  "test": {
+    "primary_client_crowded_long": {
+      "weeks": 296,
+      "crowded": 115,
+      "normal": 140,
+      "mean_normal": 0.0024500224322477958,
+      "mean_crowded": 0.0032689560883619557,
+      "diff": -0.00081893365611416,
+      "t": -0.31490166210524123
+    },
+    "client_crowded_short": {
+      "weeks": 296,
+      "crowded": 41,
+      "normal": 140,
+      "mean_normal": 0.0024500224322477958,
+      "mean_crowded": 0.003249326088938378,
+      "diff": -0.000799303656690582,
+      "t": -0.26397463334907195
+    },
+    "fii_crowded_long": {
+      "weeks": 296,
+      "crowded": 38,
+      "normal": 167,
+      "mean_normal": 0.00344094699676126,
+      "mean_crowded": -0.0006965176451101104,
+      "diff": 0.004137464641871371,
+      "t": 1.3143818782900423
+    },
+    "fii_crowded_short": {
+      "weeks": 296,
+      "crowded": 91,
+      "normal": 167,
+      "mean_normal": 0.00344094699676126,
+      "mean_crowded": 0.0033404943118444347,
+      "diff": 0.00010045268491682552,
+      "t": 0.03739387044677761
+    },
+    "client_high_put_call": {
+      "weeks": 296,
+      "crowded": 49,
+      "normal": 166,
+      "mean_normal": 0.004399821336455628,
+      "mean_crowded": -0.0004448023239625601,
+      "diff": 0.004844623660418188,
+      "t": 1.685876075282352
+    }
+  },
+  "test_passed": false
 }
