@@ -90,6 +90,19 @@ def wait_for_network() -> None:
         time.sleep(300)
 
 
+def wait_out_session() -> None:
+    """No NSE or archive traffic 09:00-15:45 on trading days: the live session, the mover
+    scanner and the news watcher need the connection (the nightly task can catch up at boot)."""
+    from datetime import time as dtime
+    from market_data import Session
+    while True:
+        now = datetime.now()
+        if not (Session().is_trading_day(now.date()) and dtime(9, 0) <= now.time() <= dtime(15, 45)):
+            return
+        log.info("trading session: paused until 15:45")
+        time.sleep(300)
+
+
 def build_index() -> None:
     import disclosure_radar
     from disclosure_radar import NSE, _rows
@@ -101,6 +114,7 @@ def build_index() -> None:
     log.info("index: %d stocks, %d to fetch", len(syms), len(todo))
     nse = None
     for i, s in enumerate(todo):
+        wait_out_session()
         rows = None
         for attempt in range(3):
             try:
@@ -180,6 +194,7 @@ def fetch_xbrl() -> None:
     rows: List[Dict] = []
     s = requests.Session()
     for i, r in enumerate(todo.itertuples(index=False)):
+        wait_out_session()
         text = None
         while text is None:
             try:

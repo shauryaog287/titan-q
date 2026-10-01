@@ -132,9 +132,17 @@ class Downloader:
         self.relogin()
 
     def relogin(self) -> None:
-        with self.lock:
-            self.api, _jwt, _feed, _client = self._login()
-            log.info("logged in")
+        """Log in, retrying through network outages. A failed login used to raise inside a
+        worker and end the whole run (2026-10-01 ~21:20, during VPN switches)."""
+        while True:
+            try:
+                with self.lock:
+                    self.api, _jwt, _feed, _client = self._login()
+                log.info("logged in")
+                return
+            except Exception as exc:
+                log.warning("login failed (%s); retrying in 2 min", type(exc).__name__)
+                time.sleep(120)
 
     def _wait_pause(self) -> None:
         while True:
@@ -209,7 +217,11 @@ def run_jobs(dl: Downloader, jobs: List[Job], label: str) -> None:
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = [pool.submit(dl.fetch, *j) for j in jobs]
         for i, f in enumerate(futures):
-            f.result()
+            try:
+                f.result()
+            except Exception as exc:                  # one chunk's error must not end the run
+                dl.failed += 1
+                log.warning("chunk %s failed: %s: %s", jobs[i][0], type(exc).__name__, str(exc)[:120])
             if time.time() - last > 60:
                 last = time.time()
                 log.info("%s: %d/%d (%d with data, %d empty, %d failed, %d rate-limit answers), %.0f min",
@@ -222,6 +234,10 @@ def main() -> None:
     ap.add_argument("--start", default="2020-01-01")
     ap.add_argument("--limit", type=int, default=0, help="only the N most liquid stocks (0 = all tradable)")
     a = ap.parse_args()
+    from procs import other_instance_running
+    if other_instance_running("angel_history.py"):
+        log.info("another angel_history.py is running; exiting")
+        return
 
     uni = load_universe()
     tr = uni[uni["tier"] == "tradable"].sort_values("median_value_60d", ascending=False)

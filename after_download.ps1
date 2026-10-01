@@ -61,12 +61,18 @@ function RunResearch($script, $name, $report) {
     }
 }
 
+# single instance: TitanQ_Angel_History (resume_download.ps1) may start this again after a reboot
+$others = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and
+    $_.CommandLine -like '*after_download.ps1*' -and $_.ProcessId -ne $PID }
+if ($others) { exit 0 }
+
 Log 'started; waiting for the research set of the minute download'
 while (-not (Test-Path $marker)) { Start-Sleep -Seconds 120 }
 Log ('research set complete: ' + ((Get-Content $marker -Raw) -replace '\s+', ' '))
 
-RunResearch 'intraday_research.py' 'M1' 'm1_intraday'
-RunResearch 'vpin_research.py' 'VPIN' 'vpin_gate'
+# each development run happens once (restarts must not re-run a recorded decision)
+if (-not (Test-Path (Join-Path $proj 'reports\m1_intraday.md'))) { RunResearch 'intraday_research.py' 'M1' 'm1_intraday' }
+if (-not (Test-Path (Join-Path $proj 'reports\vpin_gate.md'))) { RunResearch 'vpin_research.py' 'VPIN' 'vpin_gate' }
 
 Log 'waiting for the rest of the download to finish'
 while (DownloaderRunning) { Start-Sleep -Seconds 300 }
