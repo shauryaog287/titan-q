@@ -153,6 +153,12 @@ def collect(nse: NSE, day: date, tradable: Set[str]) -> Dict[str, object]:
                          f"&from_date={a:%d-%m-%Y}&to_date={b:%d-%m-%Y}"))
     _save_json(os.path.join(out_dir, "insider_trades_7d.json"), pit)
     got["pit"] = pit
+    # SEBI SAST Reg 29: buyers/sellers crossing 5% (and 2% moves above it), promoters
+    # included. Live while the PIT feed above has been empty since ~2026-05.
+    sast = _rows(nse.json("https://www.nseindia.com/api/corporate-sast-reg29?index=equities"
+                          f"&from_date={a:%d-%m-%Y}&to_date={b:%d-%m-%Y}"))
+    _save_json(os.path.join(out_dir, "sast_reg29_7d.json"), sast)
+    got["sast"] = sast
 
     ann: List[Dict] = []
     for d in (day - timedelta(days=1), day):
@@ -180,8 +186,8 @@ def collect(nse: NSE, day: date, tradable: Set[str]) -> Dict[str, object]:
                 f.write(r.content)
             n += 1
     log.info("collected: %d pledge rows, %d ASM, %d GSM, %d announcements (%d attachments saved), "
-             "%d insider-trade disclosures in 7 days, FII/DII rows %d",
-             len(pledges), len(got["asm"]), len(gsm), len(ann), n, len(pit), len(flows))
+             "%d insider-trade (PIT) and %d substantial-holding (SAST) disclosures in 7 days, FII/DII rows %d",
+             len(pledges), len(got["asm"]), len(gsm), len(ann), n, len(pit), len(sast), len(flows))
     return got
 
 
@@ -208,6 +214,15 @@ def flags(got: Dict[str, object]):
                                  f"{(x.get('attchmntText') or '')[:140]}")
         elif x.get("desc") == "Credit Rating":
             add(x.get("symbol"), f"credit rating announcement {x.get('an_dt', '')[:11]} (check direction)")
+    for x in got.get("sast", []):
+        if x.get("acquisitionMode") != "Open Market":
+            continue                          # transfers and allotments say little about intent
+        who = "PROMOTER " if x.get("promoterType") == "Y" else ""
+        side = (x.get("acqSaleType") or "").lower()
+        pct = x.get("totAcqShare") if side == "acquisition" else x.get("totSaleShare")
+        add(x.get("symbol"), f"{who}{side} of {pct or '?'}% on the open market by "
+                             f"{(x.get('acquirerName') or '')[:60]} (holding now {x.get('totAftShare')}%, "
+                             f"{(x.get('timestamp') or '')[:11]})")
     ticker = {}
     for p in got["pledges"]:
         held, pledged = _num(p.get("totPromoterHolding")), _num(p.get("numSharesPledged"))
@@ -238,6 +253,7 @@ def latest_flags(max_age_days: int = 7):
     got = {"asm": [dict(r, list=k) for k in ("longterm", "shortterm") for r in _rows(asm.get(k, {}))],
            "gsm": _rows(load("gsm.json", [])),
            "announcements": _rows(load("announcements.json", [])) + _rows(load("announcements_prev_day.json", [])),
+           "sast": _rows(load("sast_reg29_7d.json", [])),
            "pledges": []}                   # pledges are keyed by company name, not symbol
     f, _ = flags(got)
     return date.fromisoformat(days[-1]), f
@@ -268,8 +284,9 @@ def write_watchlist(day: date, got: Dict[str, object], tradable: Set[str]) -> st
         L += ["", "## Institutional cash-market flows (Rs. crore)", ""]
         L += [f"- {r.get('category')}: net {r.get('netValue')} (buy {r.get('buyValue')}, sell {r.get('sellValue')}), "
               f"{r.get('date')}" for r in flows]
-    L += ["", f"Insider-trade disclosures in the last 7 days: {len(got['pit'])} "
-          "(the NSE API has returned none since about 2026-04).", ""]
+    L += ["", f"Insider-trade (PIT) disclosures in the last 7 days: {len(got['pit'])} "
+          "(the NSE API has returned none since about 2026-05); substantial-holding (SAST Reg 29) "
+          f"disclosures: {len(got.get('sast', []))}, open-market ones flagged above.", ""]
     os.makedirs(RADAR_DIR, exist_ok=True)
     path = os.path.join(RADAR_DIR, f"{day}.md")
     text = "\n".join(L) + "\n"

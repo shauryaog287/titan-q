@@ -113,6 +113,9 @@ and pauses all workers together whenever it gets a rate-limit answer. Never rais
     passed development (2016-2020: +2.28% net excess over 60 days, t 2.23) but failed its
     test (2021-2026: -1.42%, hit rate 41%). It is not used;
   - M1 and the VPIN gate test are pending the download.
+- Insider trades: NSE's PIT API (Reg 7) has returned nothing since about 2026-05.`disclosure_radar.py` therefore also collects SAST Reg 29 substantial-holding filings
+  (buyers and sellers crossing 5%, promoters flagged; working as of 2026-10-01) and flags
+  open-market ones (observe only).
 - NIFTY opens: Yahoo's daily open equals Angel's 09:15 candle open (checked on 125 days in
   2026). The open-to-close drift question awaits the full history.
 
