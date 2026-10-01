@@ -558,7 +558,7 @@ async def main(args) -> None:
     if args.mode == "live":
         now = now_ist()
         close = session.bounds(now.date())[1]
-        if now.weekday() >= 5 or now >= close + SHUTDOWN_AFTER_CLOSE:
+        if not session.is_trading_day(now.date()) or now >= close + SHUTDOWN_AFTER_CLOSE:
             log.info("Market closed for today (%s). Next session opens %s.",
                      now.strftime("%a %d %b %H:%M IST"),
                      session.next_open(now).strftime("%a %d %b %H:%M IST"))

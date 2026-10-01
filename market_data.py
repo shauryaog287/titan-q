@@ -66,24 +66,44 @@ def _safe_name(symbol: str) -> str:
 # 1. SESSION CALENDAR
 # ===========================================================================
 
+HOLIDAYS_FILE = os.path.join(DATA_DIR, "reference", "nse_holidays.json")
+
+
+def nse_holidays() -> set:
+    """NSE cash-market trading holidays (NSE's holiday-master, cached in
+    data/reference/nse_holidays.json; refreshed by alerts.py --preflight when stale).
+    Missing file -> no holidays known (weekends still apply)."""
+    try:
+        import json as _json
+        with open(HOLIDAYS_FILE, encoding="ascii") as f:
+            rows = _json.load(f)
+        return {datetime.strptime(r["tradingDate"], "%d-%b-%Y").date() for r in rows if r.get("tradingDate")}
+    except (OSError, ValueError, KeyError):
+        return set()
+
+
 class Session:
     """
-    NSE cash-market hours in IST, Monday to Friday. Exchange holidays are not
-    listed: on a holiday Yahoo publishes no bars, the live feed goes stale,
-    and nothing trades.
+    NSE cash-market hours in IST, Monday to Friday, minus NSE's trading holidays
+    (data/reference/nse_holidays.json). Before 2026-10-01 holidays were unknown, so on a
+    holiday the system waited all day for bars that never came.
     """
 
     def __init__(self, open_hm: Tuple[int, int] = CONFIG.session_open,
                  close_hm: Tuple[int, int] = CONFIG.session_close) -> None:
         self.open_t = dtime(*open_hm)
         self.close_t = dtime(*close_hm)
+        self.holidays = nse_holidays()
+
+    def is_trading_day(self, d: date) -> bool:
+        return d.weekday() < 5 and d not in self.holidays
 
     def bounds(self, d: date) -> Tuple[datetime, datetime]:
         return (datetime.combine(d, self.open_t, IST), datetime.combine(d, self.close_t, IST))
 
     def is_open(self, ts: datetime) -> bool:
         ts = ts.astimezone(IST)
-        if ts.weekday() >= 5:
+        if not self.is_trading_day(ts.date()):
             return False
         o, c = self.bounds(ts.date())
         return o <= ts < c
@@ -95,9 +115,9 @@ class Session:
     def next_open(self, ts: datetime) -> datetime:
         ts = ts.astimezone(IST)
         d = ts.date()
-        for _ in range(8):
+        for _ in range(15):
             o, _c = self.bounds(d)
-            if d.weekday() < 5 and ts < o:
+            if self.is_trading_day(d) and ts < o:
                 return o
             d = d + timedelta(days=1)
             ts = datetime.combine(d, dtime(0, 0), IST)

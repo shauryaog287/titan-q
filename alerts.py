@@ -120,7 +120,39 @@ def on_battery() -> Optional[int]:
     return int(st.BatteryLifePercent) if st.ACLineStatus == 0 else None
 
 
+def refresh_holidays(max_age_days: float = 25.0) -> None:
+    """Keep NSE's trading-holiday list (data/reference/nse_holidays.json) fresh."""
+    from market_data import HOLIDAYS_FILE
+    if os.path.exists(HOLIDAYS_FILE) and time.time() - os.path.getmtime(HOLIDAYS_FILE) < max_age_days * 86400:
+        return
+    try:
+        s = requests.Session()
+        s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+                          "Accept": "application/json, text/plain, */*",
+                          "Referer": "https://www.nseindia.com/resources/exchange-communication-holidays"})
+        try:
+            s.get("https://www.nseindia.com/", timeout=30)
+        except requests.RequestException:
+            pass
+        cm = s.get("https://www.nseindia.com/api/holiday-master?type=trading", timeout=60).json().get("CM", [])
+        if cm:
+            os.makedirs(os.path.dirname(HOLIDAYS_FILE), exist_ok=True)
+            with open(HOLIDAYS_FILE, "w", encoding="ascii") as f:
+                json.dump(cm, f, ensure_ascii=True)
+            log.info("NSE holiday list refreshed (%d dates)", len(cm))
+    except Exception as exc:
+        log.warning("NSE holiday list not refreshed (%s)", type(exc).__name__)
+
+
 def preflight() -> List[str]:
+    from market_data import Session, now_ist
+    refresh_holidays()
+    today = now_ist().date()
+    if not Session().is_trading_day(today):
+        send("market holiday", f"{today:%a %d %b}: NSE is closed today; no session, no trading.",
+             priority="low", tags="palm_tree", repeat_minutes=600)
+        return []
     problems = [f"{name}: {why}" for name, host in HOSTS.items() for why in [tls_ok(host)] if why]
     power = on_battery()
     if power is not None:

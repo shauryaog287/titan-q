@@ -174,6 +174,10 @@ def scan_once(base: pd.DataFrame, tmap: Dict[str, str], reported: Dict[str, floa
 
 def main() -> None:
     from alerts import send
+    from market_data import Session
+    if not Session().is_trading_day(now_ist().date()):
+        log.info("not a trading day (weekend or NSE holiday); nothing to scan")
+        return
     with open(TOKEN_MAP, encoding="ascii") as f:
         tmap = json.load(f)
     base = baseline(sorted(set(tmap.values())))

@@ -472,7 +472,7 @@ def cmd_check() -> None:
 def cmd_record(until: Optional[str] = None) -> None:
     session = Session()
     now = now_ist()
-    if not until and (now.weekday() >= 5 or now >= session.bounds(now.date())[1]):
+    if not until and (not session.is_trading_day(now.date()) or now >= session.bounds(now.date())[1]):
         log.info("market closed today (%s); nothing to record", now.strftime("%a %d %b %H:%M IST"))
         return
     try:

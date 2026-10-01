@@ -67,7 +67,7 @@ def _supervise() -> None:
         if rc == 0:
             log.info("normal exit; supervisor done")
             return
-        if now.weekday() >= 5 or now >= end:
+        if not session.is_trading_day(now.date()) or now >= end:
             log.info("after the session; not restarting")
             return
         restarts += 1

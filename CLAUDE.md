@@ -99,6 +99,17 @@ and pauses all workers together whenever it gets a rate-limit answer. Never rais
 - The school Wi-Fi intercepts HTTPS to finance sites, so a VPN must stay on. Never switch off
   certificate checks.
 
+## Market calendar
+
+`market_data.Session` knows NSE trading holidays from NSE's holiday-master (`data/reference/nse_holidays.json`,
+refreshed by the 08:50 preflight when it is more than 25 days old). On a holiday:
+- the loop, the recorder, the supervisor and the mover scanner exit at once;
+- the preflight sends a "market holiday" note instead of checking the network;
+- the forward test finds no new close.
+
+Before 2026-10-01, holidays were unknown and the system would have waited all day and sent
+stale-feed alerts.
+
 ## Data and research (2026-09-28)
 
 - Angel One SmartAPI is read-only in code (`angel_feed.py`, `ReadOnlySmartConnect` blocks
