@@ -1,7 +1,7 @@
 """
 vpn_switch.py
 =============
-Turns X-VPN on or off depending on which Wi-Fi the laptop is on, so the trading system
+Turns the VPN on or off depending on which Wi-Fi the laptop is on, so the trading system
 always has a connection that does not intercept HTTPS.
 
     D:\\trader_env\\Scripts\\pythonw.exe vpn_switch.py     (scheduled task TitanQ_VPN_Switch: every
@@ -11,15 +11,24 @@ always has a connection that does not intercept HTTPS.
   and carries no traffic at all from about 22:45 until early morning):
   - if Yahoo/Angel/NSE pass a certificate-verified connection, nothing to do;
   - if there is no internet at all (the night shutdown), wait;
-  - otherwise start X-VPN if needed, press its Connect button (xvpn_connect.ps1, Windows
-    UI Automation; X-VPN has no command line), wait 45 s and check again; one retry, then
-    a phone alert.
-- On "Anjali - RES" (no interception): close X-VPN if it is running.
-- Any other network: leave X-VPN as it is.
+  - otherwise Proton VPN first (primary since 2026-10-01): close X-VPN, open Proton, press
+    its Connect button (proton_connect.ps1), wait until it says "Protected" (up to 75 s)
+    and check again;
+  - if Proton does not get through, X-VPN as before (xvpn_connect.ps1, two attempts) after
+    disconnecting Proton; then a phone alert.
+  Only one VPN runs at a time.
+- On "Anjali - RES" (no interception): disconnect Proton and close X-VPN if they are on.
+- Any other network: leave both as they are.
 
-X-VPN is a Microsoft Store app; it is started through its app ID and stopped by ending its
-processes (xvpn.exe and its own SystrayComponent.exe). Tested 2026-10-01: pressing Connect
-moved the exit to Singapore within ~40 s. Log: logs\\vpn_switch.log.
+Both apps have no command line, so their buttons are pressed through Windows UI Automation.
+- Proton VPN 5.1.5 (C:\\Program Files\\Proton\\VPN): fixed element ids. Tested on 2026-10-01
+  on the school Wi-Fi: it was "Protected" in 32 s and all three sites passed. Its kill switch
+  is off, so disconnecting never cuts the internet.
+- X-VPN (a Microsoft Store app): started through its app ID and stopped by ending its
+  processes. It hung on its loading screen 14:40-15:41 on 2026-10-01.
+- Cloudflare WARP was tried on 2026-10-01 and cannot connect on the school Wi-Fi.
+
+Log: logs\\vpn_switch.log.
 """
 
 from __future__ import annotations
@@ -33,6 +42,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCHOOL_SSID = "Mayo Students-M"
 HOME_SSID = "Anjali - RES"
 XVPN_APP = r"shell:AppsFolder\29645FreeConnectedLimited.X-VPN-FreeUnlimitedVPNPr_qjvpctbgym0d0!App"
+PROTON_APP = r"C:\Program Files\Proton\VPN\ProtonVPN.Launcher.exe"
 CHECK_HOSTS = ("query1.finance.yahoo.com", "apiconnect.angelone.in", "www.nseindia.com")
 NO_WINDOW = 0x08000000
 
@@ -112,6 +122,52 @@ def press_connect() -> str:
                 os.path.join(PROJECT_DIR, "xvpn_connect.ps1")]).strip()
 
 
+def proton(action: str) -> str:
+    """Proton VPN's button via UI Automation: 'connect', 'disconnect' or 'status'."""
+    return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                os.path.join(PROJECT_DIR, "proton_connect.ps1"), action]).strip()
+
+
+def proton_running() -> bool:
+    return "protonvpn.client.exe" in run(["tasklist", "/FI", "IMAGENAME eq ProtonVPN.Client.exe", "/NH"]).lower()
+
+
+def open_proton() -> None:
+    """Starts Proton VPN, or brings its window back if it sits in the tray (single instance)."""
+    if os.path.exists(PROTON_APP):
+        subprocess.Popen([PROTON_APP], creationflags=NO_WINDOW)
+
+
+def try_proton() -> bool:
+    """Connect with Proton VPN; True if the finance sites pass afterwards."""
+    if not os.path.exists(PROTON_APP):
+        return False
+    if xvpn_running():
+        stop_xvpn()                                   # one VPN at a time
+        time.sleep(5)
+    open_proton()
+    time.sleep(8)
+    result = proton("connect") or "no answer from the UI helper"
+    log.info("Proton: %s", result)
+    if not (result.startswith("CLICKED") or result.startswith("ALREADY")):
+        return False
+    t0 = time.time()
+    while time.time() - t0 < 75:
+        st = proton("status")
+        if st.startswith("STATUS Protected"):
+            break
+        time.sleep(5)
+    time.sleep(5)
+    bad = blocked_hosts()
+    if not bad:
+        log.info("Proton connected (%s): Yahoo, Angel and NSE pass", proton("status"))
+        return True
+    log.warning("Proton did not get through (%s): %s", proton("status"), ", ".join(bad))
+    proton("disconnect")
+    time.sleep(5)
+    return False
+
+
 def main() -> None:
     ssid = current_ssid()
     running = xvpn_running()
@@ -121,7 +177,10 @@ def main() -> None:
             return                                    # VPN already working (or not needed)
         if not internet_up():
             return                                    # network flow off (night): nothing to do
-        log.info("on %s, finance sites blocked (%s): connecting X-VPN", ssid, ", ".join(bad))
+        log.info("on %s, finance sites blocked (%s): connecting Proton VPN", ssid, ", ".join(bad))
+        if try_proton():
+            return
+        log.info("falling back to X-VPN")
         for attempt in (1, 2):
             if not xvpn_running():
                 start_xvpn()
@@ -142,15 +201,18 @@ def main() -> None:
         bad = blocked_hosts()
         if not bad:
             return
-        log.warning("X-VPN still not working: %s", ", ".join(bad))
-        alert("VPN not connected", "On school Wi-Fi, X-VPN could not connect after two tries (it may "
-              "be stuck on its loading screen: the network is blocking it). Finance sites still blocked: "
-              + ", ".join(bad) + ". It retries every 2 minutes.")
+        log.warning("no VPN got through: %s", ", ".join(bad))
+        alert("VPN not connected", "On school Wi-Fi, neither Proton VPN nor X-VPN could connect. "
+              "Finance sites still blocked: " + ", ".join(bad) + ". It retries every 2 minutes.")
     elif ssid == HOME_SSID:
         if running:
             log.info("on %s: closing X-VPN (not needed here)", ssid)
             stop_xvpn()
-    # any other network or no Wi-Fi: leave X-VPN as it is
+        if proton_running():
+            st = proton("status")
+            if st.startswith("STATUS Protected") or st.startswith("STATUS Connecting"):
+                log.info("on %s: disconnecting Proton VPN (not needed here): %s", ssid, proton("disconnect"))
+    # any other network or no Wi-Fi: leave both as they are
 
 
 if __name__ == "__main__":
