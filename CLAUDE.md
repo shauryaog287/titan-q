@@ -175,10 +175,14 @@ pre-registered protocol in `reports/preregistration_sizing_vol.md`:
 
 The decisions are in `reports/decision_sizing_vol_{dev,test}.md`.
 
-v3.2 (always invested, no brakes) was the user's choice for one session on 2026-10-01; that
-evening the user asked for "growth with a little bit of brakes", and v3.1 is the default again:
-`sizing_mode="kelly"`, CRASH 0.0, UNKNOWN 0.5, novel 0.5 and `es_trim` 0.5. `sizing_mode="full"` with all
-multipliers at 1.0 reproduces v3.2.
+v3.2 (2026-10-01, the user's final choice after the 2016-2026 comparison in
+`reports/backtest_daily_report_cmp_{live,market,crash_only}.md`; exploratory): always invested
+(`sizing_mode="full"`), no regime or EVT brakes, and the 3% daily loss halt. Results over 2016-2026:
+- brakes (v3.1): 7.8%/yr, max drawdown 16.4%;
+- crash brake only: 12.9%/yr, max drawdown 28.2%;
+- always invested: 14.3%/yr, max drawdown 28.7% (the 2020 crash).
+
+To restore v3.1, set `sizing_mode="kelly"`, CRASH 0, UNKNOWN 0.5, novel 0.5 and `es_trim` 0.5.
 
 ## Model status (manifest of 2026-09-26)
 

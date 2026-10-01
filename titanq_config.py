@@ -129,18 +129,20 @@ class Config:
     # accepts deeper falls). Exploratory backtest of this "market" variant, 2019-2026:
     # CAGR 16.4%, max drawdown 33% vs v3's 24% (reports/exploratory_market_variant.md).
     # It is a risk preference, not a protocol result. The 3% daily loss halt still applies.
-    # 2026-10-01 evening: the user asked for "growth with a little bit of brakes" after a
-    # -0.9% market day, so "kelly" (v3.1) is back. In calm markets it is still 100% invested.
-    sizing_mode: str = "kelly"
+    # 2026-10-01 evening, the user's final choice after the 2016-2026 comparison
+    # (reports/backtest_daily_report_cmp_*.md, exploratory): always invested + the 3% daily
+    # halt. Brakes v3.1 7.8%/yr (max DD 16.4%); crash-only 12.9% (28.2%); always invested
+    # 14.3% (28.7%, the 2020 crash). "kelly" restores v3.1 sizing.
+    sizing_mode: str = "full"
 
     # ---- regime (Phase 11): exposure multiplier per regime ---------------------
-    # Brakes back on 2026-10-01 evening (they were off for one session as v3.2):
-    # CRASH -> 0, UNKNOWN / a novel regime -> 0.5; routine regimes do not cut exposure.
+    # Regime brakes off (the user's choice, 2026-10-01 evening). v3.1 used CRASH 0.0,
+    # UNKNOWN 0.5 and novel 0.5; set them back (with sizing_mode "kelly") to restore brakes.
     regime_multipliers: Dict[str, float] = field(default_factory=lambda: {
         "BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 1.0, "BEAR": 1.0,
-        "CRASH": 0.0, "UNKNOWN": 0.5,
+        "CRASH": 1.0, "UNKNOWN": 1.0,
     })
-    novel_regime_multiplier: float = 0.5   # observation unlike every trained regime
+    novel_regime_multiplier: float = 1.0   # observation unlike every trained regime (v3.1: 0.5)
 
     # ---- PPO timing (Phase 5 policy) ------------------------------------------
     # "auto": use the policy only if train_models.py found it beat buy-and-hold
@@ -154,7 +156,7 @@ class Config:
     # index's own 1-day ES. (The original spec said "12%" with no level or horizon;
     # a 99% 1-day ES of a large-cap basket is typically 3-6%, so 12% never fired.)
     es_relative_threshold: float = 1.5
-    es_trim: float = 0.5                   # halve exposure on extreme tail risk (back on 2026-10-01)
+    es_trim: float = 1.0                   # no tail-risk trim (v3.1: 0.5); off with the other brakes
 
     # ---- intraday toxicity (Phase 14, VPIN part) ---------------------------------
     vpin_buckets_per_day: int = 50
