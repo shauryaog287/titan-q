@@ -210,3 +210,20 @@ GitHub.
 - **Lesson:** the trading PC needs a connection that is not intercepted, either a VPN that
   covers the whole machine and reconnects on its own, or the hotspot. Alternatively, a small
   cloud server in Mumbai.
+
+## 2026-10-01, 10:10 IST
+
+- **Session start:** the laptop did not wake by itself at 08:50 or 09:10. The battery was at
+  22%, so it had run unplugged overnight, and wake timers are off on battery. The scheduled
+  tasks ran at 09:58, when it was woken.
+- **VPN:** on (exit Singapore). Yahoo, Angel, NSE and GitHub all pass.
+- **Trading:** the plan is Kelly 1.000 and 100% in 50 stocks. Daily data refreshed 23/51; the
+  rest came from the cache. Trading started at 10:00 with 47 paper buys; cash left Rs. 68,410.
+- **Recorder:**
+  - Logged in at 09:59 after one failed try, and records 2,700 stocks.
+  - At 10:02 all 3 connections dropped while the network switched to the VPN. The new
+    supervisor reconnected them by 10:05, back to about 590 rows/s, with no crash.
+- **Forward test:** 2026-09-30 recorded (Rs. 509,049.16; equal-weight 99.58).
+- **Pushed:** all pending commits.
+- **Background downloads:** FO participant 2,100/2,647 days, with 627 failed during outages
+  to be re-fetched; Angel minute research set 13,459/22,731.
