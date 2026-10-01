@@ -1,0 +1,50 @@
+{
+  "development": {
+    "primary_client_crowded_long": {
+      "weeks": 216,
+      "crowded": 64,
+      "normal": 114,
+      "mean_normal": 0.007165972208882302,
+      "mean_crowded": -0.003452450906631323,
+      "diff": 0.010618423115513625,
+      "t": 2.175070957498408
+    },
+    "client_crowded_short": {
+      "weeks": 216,
+      "crowded": 38,
+      "normal": 114,
+      "mean_normal": 0.007165972208882302,
+      "mean_crowded": 0.00012140648344766429,
+      "diff": 0.007044565725434638,
+      "t": 1.6640821751532315
+    },
+    "fii_crowded_long": {
+      "weeks": 216,
+      "crowded": 40,
+      "normal": 109,
+      "mean_normal": 0.005600074882501347,
+      "mean_crowded": 0.004216782170883846,
+      "diff": 0.0013832927116175014,
+      "t": 0.32366869022505207
+    },
+    "fii_crowded_short": {
+      "weeks": 216,
+      "crowded": 67,
+      "normal": 109,
+      "mean_normal": 0.005600074882501347,
+      "mean_crowded": -0.0026642093861016674,
+      "diff": 0.008264284268603015,
+      "t": 1.719973484699689
+    },
+    "client_high_put_call": {
+      "weeks": 216,
+      "crowded": 50,
+      "normal": 135,
+      "mean_normal": 0.001991534251907005,
+      "mean_crowded": 0.005555663929472026,
+      "diff": -0.003564129677565021,
+      "t": -1.011242742842172
+    }
+  },
+  "qualifies": true
+}

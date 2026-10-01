@@ -86,6 +86,14 @@ def fetch(start: str = "2016-01-01") -> None:
     print(f"done; {missing} days had no usable file", flush=True)
 
 
+def _num(x) -> float:
+    """Some days' files write numbers with thousands separators ("80,776.00")."""
+    try:
+        return float(str(x).replace(",", "").strip())
+    except ValueError:
+        return float("nan")
+
+
 def panel() -> pd.DataFrame:
     """Per date: Client and FII net index-futures ratios, Client index put/call (longs)."""
     rows = {}
@@ -97,11 +105,11 @@ def panel() -> pd.DataFrame:
             rec = {}
             for who in ("Client", "FII"):
                 if who in df.index:
-                    L, S = float(df.loc[who, "Future Index Long"]), float(df.loc[who, "Future Index Short"])
+                    L, S = _num(df.loc[who, "Future Index Long"]), _num(df.loc[who, "Future Index Short"])
                     rec[f"{who}_net"] = (L - S) / (L + S) if L + S > 0 else np.nan
             if "Client" in df.index:
-                c = float(df.loc["Client", "Option Index Call Long"])
-                rec["Client_pcr"] = float(df.loc["Client", "Option Index Put Long"]) / c if c > 0 else np.nan
+                c = _num(df.loc["Client", "Option Index Call Long"])
+                rec["Client_pcr"] = _num(df.loc["Client", "Option Index Put Long"]) / c if c > 0 else np.nan
             rows[pd.Timestamp(f[:10])] = rec
     return pd.DataFrame(rows).T.sort_index()
 
