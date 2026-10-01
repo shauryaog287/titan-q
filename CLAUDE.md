@@ -158,7 +158,14 @@ pre-registered protocol in `reports/preregistration_sizing_vol.md`:
 - development 2016-2020: Sharpe 0.91 vs 0.65, max drawdown 16.3% vs 23.9%;
 - test 2021-2026: Sharpe 0.91 vs 0.85, a small gain, with about 45% more trades.
 
-The decisions are in `reports/decision_sizing_vol_{dev,test}.md`. The next open question for
+The decisions are in `reports/decision_sizing_vol_{dev,test}.md`.
+
+v3.2 (2026-10-01), the user's risk choice: `sizing_mode="full"` (always 100% invested;
+Kelly is logged only), and ALL brakes off: CRASH and UNKNOWN regime multipliers 1.0, the novel
+regime multiplier 1.0, and `es_trim` 1.0. The only brake left is the 3% daily loss halt. This is a
+risk preference, not a protocol result. The exploratory "market" variant of 2019-2026 is the
+closest backtest: CAGR 16.4%, max drawdown 33%, against 24% with brakes. To restore the brakes, set
+`sizing_mode="kelly"`, CRASH 0.0, UNKNOWN 0.5, novel 0.5 and `es_trim` 0.5. The next open question for
 the same protocol is whether the CRASH, novel and EVT limits earn their place: the strategy was
 fully in cash on 102 days in 2021-2026. `sizing_experiment_decide.py` applies a written rule
 mechanically. Keep that pattern: write the rule, run development, commit the decision, then

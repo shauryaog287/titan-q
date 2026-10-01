@@ -123,14 +123,22 @@ class Config:
                                            # 2016-2020 Sharpe 0.91 vs 0.65; test 2021-2026
                                            # 0.91 vs 0.85, at ~45% more trades.
 
+    # "full": always max_exposure (no Kelly or volatility cuts; Kelly is still logged).
+    # "kelly": quarter Kelly on the EWMA variance, as v3.1. The user chose "full" with no
+    # crash brakes on 2026-10-01 (risk appetite: small capital, wants higher return and
+    # accepts deeper falls). Exploratory backtest of this "market" variant, 2019-2026:
+    # CAGR 16.4%, max drawdown 33% vs v3's 24% (reports/exploratory_market_variant.md).
+    # It is a risk preference, not a protocol result. The 3% daily loss halt still applies.
+    sizing_mode: str = "full"
+
     # ---- regime (Phase 11): exposure multiplier per regime ---------------------
-    # Routine regimes do not cut exposure: timing overlays lowered returns without
-    # improving Sharpe in development. CRASH and novel regimes remain hard limits.
+    # All 1.0 since 2026-10-01 (no crash brakes, the user's choice). Until then CRASH -> 0
+    # and UNKNOWN / a novel regime -> 0.5 were hard limits; restore them to bring brakes back.
     regime_multipliers: Dict[str, float] = field(default_factory=lambda: {
         "BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 1.0, "BEAR": 1.0,
-        "CRASH": 0.0, "UNKNOWN": 0.5,
+        "CRASH": 1.0, "UNKNOWN": 1.0,
     })
-    novel_regime_multiplier: float = 0.5   # observation unlike every trained regime
+    novel_regime_multiplier: float = 1.0   # observation unlike every trained regime (was 0.5)
 
     # ---- PPO timing (Phase 5 policy) ------------------------------------------
     # "auto": use the policy only if train_models.py found it beat buy-and-hold
@@ -144,7 +152,8 @@ class Config:
     # index's own 1-day ES. (The original spec said "12%" with no level or horizon;
     # a 99% 1-day ES of a large-cap basket is typically 3-6%, so 12% never fired.)
     es_relative_threshold: float = 1.5
-    es_trim: float = 0.5
+    es_trim: float = 1.0                   # was 0.5 (halve exposure on extreme tail risk); off
+                                           # since 2026-10-01 with the other brakes
 
     # ---- intraday toxicity (Phase 14, VPIN part) ---------------------------------
     vpin_buckets_per_day: int = 50

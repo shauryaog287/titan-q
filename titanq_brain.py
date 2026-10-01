@@ -451,8 +451,10 @@ def build_daily_context(daily: Dict[str, pd.DataFrame], asof: date, equity: floa
         ctx.evt_multiplier = cfg.es_trim
     ctx.components["evt"] = "ok" if ctx.basket_es is not None else "error: POT fit failed"
 
-    # exposure and targets
-    ctx.exposure = float(min(cfg.max_exposure, max(0.0, ctx.kelly_f * ctx.regime_multiplier
+    # exposure and targets. sizing_mode "full" (the user's choice on 2026-10-01): always
+    # max_exposure; Kelly is still computed and logged, but only for information.
+    base_f = cfg.max_exposure if cfg.sizing_mode == "full" else ctx.kelly_f
+    ctx.exposure = float(min(cfg.max_exposure, max(0.0, base_f * ctx.regime_multiplier
                                                    * ctx.ppo_multiplier * ctx.evt_multiplier)))
     if not ctx.tradeable:
         ctx.exposure = 0.0
@@ -708,7 +710,8 @@ def _test_context_on_synthetic_data() -> None:
     ev_log.setLevel(logging.ERROR)                             # EVT warns on short synthetic tails
     try:
         def ctx_for(asof, h, data=daily):
-            cfg = dataclasses.replace(CONFIG, sizing_vol_halflife_days=h)
+            # Kelly sizing with brakes explicitly (the live default is now "full" and no brakes)
+            cfg = dataclasses.replace(CONFIG, sizing_vol_halflife_days=h, sizing_mode="kelly")
             return build_daily_context(data, asof, 500_000.0, cfg=cfg, manifest={"components": {}},
                                        with_te=False, regime_fn=regime, holdings=[])
 
