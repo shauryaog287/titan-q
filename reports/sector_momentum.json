@@ -1,0 +1,101 @@
+{
+  "development": {
+    "primary_top3_12_1": {
+      "months": 51,
+      "excess_ann": 0.022780906547934146,
+      "t": 0.3679382859370238,
+      "month_hit": 0.5490196078431373,
+      "port_ann": 0.13613854652823756
+    },
+    "top1_12_1": {
+      "months": 51,
+      "excess_ann": 0.02992845499218225,
+      "t": 0.3147910539683349,
+      "month_hit": 0.49019607843137253,
+      "port_ann": 0.14328609497248568
+    },
+    "top5_12_1": {
+      "months": 51,
+      "excess_ann": 0.01842547336041683,
+      "t": 0.44599187407228597,
+      "month_hit": 0.5294117647058824,
+      "port_ann": 0.1317831133407203
+    },
+    "top3_6_1": {
+      "months": 51,
+      "excess_ann": 0.021798598388875257,
+      "t": 0.3758532206398247,
+      "month_hit": 0.47058823529411764,
+      "port_ann": 0.13515623836917873
+    },
+    "bottom3_12_1": {
+      "months": 51,
+      "excess_ann": -0.13610154643948752,
+      "t": -2.2133170602574106,
+      "month_hit": 0.39215686274509803,
+      "port_ann": -0.0227439064591841
+    }
+  },
+  "share_top3": {
+    "has_defense": 0.0,
+    "has_utilities": 0.0,
+    "has_banks": 0.058823529411764705,
+    "has_energy": 0.2549019607843137
+  },
+  "ew_ann": 0.11335763998030345,
+  "months": 51,
+  "qualifies": false,
+  "top3_by_month": {
+    "2016-10-28": "Credit Services | Building Materials | Oil & Gas Refining & Marketing",
+    "2016-11-30": "Specialty Chemicals | Credit Services | Oil & Gas Refining & Marketing",
+    "2016-12-30": "Credit Services | Oil & Gas Refining & Marketing | Conglomerates",
+    "2017-01-31": "Credit Services | Steel | Conglomerates",
+    "2017-02-28": "Conglomerates | Steel | Credit Services",
+    "2017-03-31": "Oil & Gas Refining & Marketing | Credit Services | Banks - Regional",
+    "2017-04-28": "Credit Services | Oil & Gas Refining & Marketing | Auto Parts",
+    "2017-05-31": "Oil & Gas Refining & Marketing | Banks - Regional | Auto Parts",
+    "2017-06-30": "Auto Parts | Oil & Gas Refining & Marketing | Steel",
+    "2017-07-31": "Auto Parts | Steel | Agricultural Inputs",
+    "2017-08-31": "Specialty Chemicals | Specialty Industrial Machinery | Steel",
+    "2017-09-29": "Specialty Chemicals | Electrical Equipment & Parts | Specialty Industrial Machinery",
+    "2017-10-31": "Electrical Equipment & Parts | Specialty Chemicals | Packaged Foods",
+    "2017-11-30": "Electrical Equipment & Parts | Specialty Chemicals | Packaged Foods",
+    "2017-12-29": "Electrical Equipment & Parts | Specialty Chemicals | Chemicals",
+    "2018-01-31": "Electrical Equipment & Parts | Chemicals | Specialty Chemicals",
+    "2018-02-28": "Electrical Equipment & Parts | Specialty Chemicals | Chemicals",
+    "2018-03-28": "Electrical Equipment & Parts | Specialty Chemicals | Steel",
+    "2018-04-30": "Electrical Equipment & Parts | Specialty Chemicals | Steel",
+    "2018-05-31": "Electrical Equipment & Parts | Specialty Chemicals | Packaged Foods",
+    "2018-06-29": "Electrical Equipment & Parts | Specialty Chemicals | Information Technology Services",
+    "2018-07-31": "Electrical Equipment & Parts | Information Technology Services | Specialty Chemicals",
+    "2018-08-31": "Electrical Equipment & Parts | Information Technology Services | Specialty Chemicals",
+    "2018-09-28": "Electrical Equipment & Parts | Information Technology Services | Household & Personal Products",
+    "2018-10-31": "Information Technology Services | Electrical Equipment & Parts | Household & Personal Products",
+    "2018-11-30": "Information Technology Services | Electrical Equipment & Parts | Household & Personal Products",
+    "2018-12-31": "Information Technology Services | Electrical Equipment & Parts | Household & Personal Products",
+    "2019-01-31": "Household & Personal Products | Information Technology Services | Credit Services",
+    "2019-02-28": "Household & Personal Products | Information Technology Services | Credit Services",
+    "2019-03-28": "Household & Personal Products | Information Technology Services | Credit Services",
+    "2019-04-30": "Credit Services | Information Technology Services | Banks - Regional",
+    "2019-05-31": "Information Technology Services | Credit Services | Drug Manufacturers - Specialty & Generic",
+    "2019-06-28": "Credit Services | Information Technology Services | Building Materials",
+    "2019-07-31": "Credit Services | Specialty Industrial Machinery | Engineering & Construction",
+    "2019-08-30": "Credit Services | Oil & Gas Refining & Marketing | Information Technology Services",
+    "2019-09-30": "Credit Services | Oil & Gas Refining & Marketing | Information Technology Services",
+    "2019-10-31": "Credit Services | Oil & Gas Refining & Marketing | Household & Personal Products",
+    "2019-11-29": "Oil & Gas Refining & Marketing | Credit Services | Packaged Foods",
+    "2019-12-31": "Credit Services | Oil & Gas Refining & Marketing | Packaged Foods",
+    "2020-01-31": "Credit Services | Specialty Chemicals | Oil & Gas Refining & Marketing",
+    "2020-02-28": "Specialty Chemicals | Credit Services | Steel",
+    "2020-03-31": "Specialty Chemicals | Credit Services | Drug Manufacturers - Specialty & Generic",
+    "2020-04-30": "Specialty Chemicals | Drug Manufacturers - Specialty & Generic | Household & Personal Products",
+    "2020-05-29": "Specialty Chemicals | Drug Manufacturers - Specialty & Generic | Household & Personal Products",
+    "2020-06-30": "Drug Manufacturers - Specialty & Generic | Agricultural Inputs | Specialty Chemicals",
+    "2020-07-31": "Agricultural Inputs | Drug Manufacturers - Specialty & Generic | Packaged Foods",
+    "2020-08-31": "Chemicals | Drug Manufacturers - Specialty & Generic | Packaged Foods",
+    "2020-09-30": "Drug Manufacturers - Specialty & Generic | Chemicals | Agricultural Inputs",
+    "2020-10-30": "Drug Manufacturers - Specialty & Generic | Information Technology Services | Specialty Chemicals",
+    "2020-11-27": "Drug Manufacturers - Specialty & Generic | Information Technology Services | Specialty Chemicals",
+    "2020-12-31": "Drug Manufacturers - Specialty & Generic | Information Technology Services | Electrical Equipment & Parts"
+  }
+}

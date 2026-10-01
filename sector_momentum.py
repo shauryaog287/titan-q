@@ -206,6 +206,10 @@ def main() -> None:
          f"banks {100 * share['has_banks']:.0f}%, energy {100 * share['has_energy']:.0f}%.", "",
          f"Rule: excess >= +{100 * MIN_EXCESS:.1f}% a year, month t >= {MIN_T:.1f}, beats EW in >= "
          f"{100 * MIN_HIT:.0f}% of months.", "",
+         f"Note: the first month end used is {d.index[0].date()}, not 2016-01. `eligible_at` needs 2 years "
+         "(504 rows) of price history and the daily cache starts on 2014-09-30, so no stock is eligible "
+         "earlier. This follows from the pre-registered eligibility rule, not from a choice made after "
+         "seeing results.", "",
          f"**Decision: {'qualifies; reveal the test once' if ok else 'does not qualify; the test stays sealed'}.**", ""]
     out = {"development": res, "share_top3": share, "ew_ann": float(ew.mean() * 12), "months": int(len(d)),
            "qualifies": ok, "top3_by_month": {str(k.date()): v for k, v in d["top3_industries"].items()}}
