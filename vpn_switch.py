@@ -126,15 +126,26 @@ def main() -> None:
             if not xvpn_running():
                 start_xvpn()
                 time.sleep(15)
-            log.info("X-VPN: %s", press_connect() or "no answer from the UI helper")
+            result = press_connect() or "no answer from the UI helper"
+            log.info("X-VPN: %s", result)
+            if result.startswith("LOADING") or result.startswith("NOWINDOW"):
+                # stuck on the loading screen (X in the middle): X-VPN cannot reach its
+                # servers. Restart the app for the next attempt instead of waiting on it.
+                stop_xvpn()
+                time.sleep(5)
+                continue
             time.sleep(45)                            # the tunnel takes ~30-45 s to come up
             bad = blocked_hosts()
             if not bad:
                 log.info("X-VPN connected: Yahoo, Angel and NSE pass (attempt %d)", attempt)
                 return
+        bad = blocked_hosts()
+        if not bad:
+            return
         log.warning("X-VPN still not working: %s", ", ".join(bad))
-        alert("VPN not connected", "On school Wi-Fi, X-VPN was opened and Connect pressed twice, but "
-              "finance sites are still blocked (" + ", ".join(bad) + "). Check X-VPN.")
+        alert("VPN not connected", "On school Wi-Fi, X-VPN could not connect after two tries (it may "
+              "be stuck on its loading screen: the network is blocking it). Finance sites still blocked: "
+              + ", ".join(bad) + ". It retries every 2 minutes.")
     elif ssid == HOME_SSID:
         if running:
             log.info("on %s: closing X-VPN (not needed here)", ssid)
