@@ -77,7 +77,7 @@ ALIASES: Dict[str, List[str]] = {
     "ONGC": ["ONGC"], "POWERGRID": ["Power Grid"], "HINDALCO": ["Hindalco"], "M&M": ["M&M", "Mahindra & Mahindra"],
     "NTPC": ["NTPC"], "INDUSINDBK": ["IndusInd"], "GRASIM": ["Grasim"], "DIVISLAB": ["Divi's", "Divis Lab"],
     "TMPV": ["Tata Motors"], "BAJAJ-AUTO": ["Bajaj Auto"], "JSWSTEEL": ["JSW Steel"], "BRITANNIA": ["Britannia"],
-    "ADANIPORTS": ["Adani Ports"], "CIPLA": ["Cipla"], "HDFCLIFE": ["HDFC Life"], "HEROMOTOCO": ["Hero MotoCorp"],
+    "ADANIPORTS": ["Adani Ports"], "CIPLA": ["Cipla"], "HDFCLIFE": ["HDFC Life"], "HEROMOTOCO": ["Hero MotoCorp", "Hero Moto"],
     "COALINDIA": ["Coal India"], "TATACONSUM": ["Tata Consumer"], "APOLLOHOSP": ["Apollo Hospitals"],
     "UPL": ["UPL"], "DRREDDY": ["Dr Reddy", "Dr. Reddy"], "EICHERMOT": ["Eicher", "Royal Enfield"],
     "BPCL": ["BPCL"], "SBILIFE": ["SBI Life"], "SHREECEM": ["Shree Cement"], "TATAPOWER": ["Tata Power"],
@@ -175,7 +175,7 @@ def focus_symbols() -> List[str]:
     return sorted(syms)
 
 
-def fetch_items(tagger: Tagger, focus: Sequence[str]) -> List[Dict]:
+def fetch_items(tagger: Tagger, focus: Sequence[str], rss: bool = True, google: bool = True) -> List[Dict]:
     import feedparser
     s = requests.Session()
     s.headers.update(UA)
@@ -201,7 +201,7 @@ def fetch_items(tagger: Tagger, focus: Sequence[str]) -> List[Dict]:
             kept += 1
         return kept
 
-    for name, url in FEEDS.items():
+    for name, url in (FEEDS.items() if rss else []):
         try:
             r = s.get(url, timeout=30)
             r.raise_for_status()
@@ -209,7 +209,7 @@ def fetch_items(tagger: Tagger, focus: Sequence[str]) -> List[Dict]:
         except Exception as exc:
             log.warning("%s: failed (%s)", name, type(exc).__name__)
         time.sleep(1.0)
-    for i in range(0, len(focus), GNEWS_BATCH):
+    for i in (range(0, len(focus), GNEWS_BATCH) if google else []):
         batch = focus[i:i + GNEWS_BATCH]
         q = " OR ".join(f'"{tagger.names.get(sym, sym)}"' for sym in batch)
         url = f"https://news.google.com/rss/search?q={quote_plus(q + ' when:1d')}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -227,11 +227,18 @@ def fetch_items(tagger: Tagger, focus: Sequence[str]) -> List[Dict]:
 # SCORE
 # ===========================================================================
 
+_CLF = None
+
+
 def finbert_scores(texts: List[str]) -> List[Dict[str, float]]:
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")          # the model is in the local cache
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    from transformers import pipeline
-    clf = pipeline("text-classification", model="ProsusAI/finbert", top_k=None, truncation=True)
+    """FinBERT tone per text; the model is loaded once per process (news_watch.py keeps it)."""
+    global _CLF
+    if _CLF is None:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")          # the model is in the local cache
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        from transformers import pipeline
+        _CLF = pipeline("text-classification", model="ProsusAI/finbert", top_k=None, truncation=True)
+    clf = _CLF
     out = []
     for i in range(0, len(texts), 32):
         for res in clf(texts[i:i + 32]):
@@ -262,8 +269,7 @@ def load_news(hours: float = 24.0) -> pd.DataFrame:
     return df[df["first_seen"] >= pd.Timestamp(now - timedelta(hours=hours))]
 
 
-def collect() -> int:
-    os.makedirs(NEWS_DIR, exist_ok=True)
+def make_tagger(focus: Sequence[str]) -> Tagger:
     uni_syms = set(equity_list()["symbol"])
     try:
         from universe import load_universe
@@ -271,16 +277,21 @@ def collect() -> int:
         tradable = set(uni.loc[uni["tier"] == "tradable", "symbol"].str.replace("-EQ", "", regex=False))
     except Exception:
         tradable = set()
-    focus = focus_symbols()
-    tagger = Tagger(sorted((tradable | set(focus)) & uni_syms))
-    items = fetch_items(tagger, focus)
+    return Tagger(sorted((tradable | set(focus)) & uni_syms))
+
+
+def ingest(items: List[Dict], tagger: Tagger, fixed_symbols: Optional[Dict[str, str]] = None) -> List[Dict]:
+    """Deduplicate against today's and yesterday's files, tag, score with FinBERT, append to
+    today's file (atomic), copy it to Google Drive. Returns the NEW rows. An item may carry
+    its own symbol in fixed_symbols[title] (NSE filings), which is used instead of tagging."""
+    os.makedirs(NEWS_DIR, exist_ok=True)
     now = now_ist()
     path = day_file(now.date())
     old = pd.read_parquet(path) if os.path.exists(path) else pd.DataFrame()
     seen = set(old["key"]) if len(old) else set()
-    for d in (now.date() - timedelta(days=1),):            # also skip what yesterday's file has
-        if os.path.exists(day_file(d)):
-            seen |= set(pd.read_parquet(day_file(d))["key"])
+    prev = day_file(now.date() - timedelta(days=1))          # also skip what yesterday's file has
+    if os.path.exists(prev):
+        seen |= set(pd.read_parquet(prev)["key"])
     new: Dict[str, Dict] = {}
     for it in items:
         k = title_key(it["title"])
@@ -289,7 +300,8 @@ def collect() -> int:
         if k in new:
             new[k]["sources"] = ",".join(sorted(set(new[k]["sources"].split(",")) | {it["source"]}))
             continue
-        syms = tagger.tag(it["title"] + " " + it["summary"])
+        sym = (fixed_symbols or {}).get(it["title"])
+        syms = [sym] if sym else tagger.tag(it["title"] + " " + it["summary"])
         new[k] = {"key": k, "first_seen": now.isoformat(timespec="seconds"), "published": it["published"],
                   "source": it["source"], "sources": it["source"], "title": it["title"],
                   "summary": it["summary"], "link": it["link"], "symbols": ",".join(syms)}
@@ -302,11 +314,19 @@ def collect() -> int:
         df = pd.concat([old, pd.DataFrame(rows)], ignore_index=True) if len(old) else pd.DataFrame(rows)
         df.to_parquet(path + ".partial", index=False)
         os.replace(path + ".partial", path)
-    tagged = sum(1 for r in rows if r["symbols"])
-    log.info("%d items fetched, %d new headlines (%d tagged to stocks)", len(items), len(rows), tagged)
-    if os.path.isdir(os.path.dirname(os.path.dirname(DRIVE_DIR))) and os.path.exists(path):
-        os.makedirs(DRIVE_DIR, exist_ok=True)
-        shutil.copy2(path, os.path.join(DRIVE_DIR, os.path.basename(path)))
+        if os.path.isdir(os.path.dirname(os.path.dirname(DRIVE_DIR))):
+            os.makedirs(DRIVE_DIR, exist_ok=True)
+            shutil.copy2(path, os.path.join(DRIVE_DIR, os.path.basename(path)))
+    return rows
+
+
+def collect() -> int:
+    focus = focus_symbols()
+    tagger = make_tagger(focus)
+    items = fetch_items(tagger, focus)
+    rows = ingest(items, tagger)
+    log.info("%d items fetched, %d new headlines (%d tagged to stocks)", len(items), len(rows),
+             sum(1 for r in rows if r["symbols"]))
     return len(rows)
 
 

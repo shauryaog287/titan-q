@@ -51,7 +51,7 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 |---|---|---|
 | TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop (under `run_live.py`), Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
 | TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
-| TitanQ_News | every 30 min, 07:30-21:30 daily | `news_analyser.py`: ET, Business Standard, Mint RSS plus Google News for held/planned stocks; FinBERT tone; `data/news/news_<date>.parquet` (first-seen times) copied to G:. Observe only. |
+| TitanQ_News | starts 07:30 (watchdog every 30 min) | `news_watch.py` runs until 21:35: NSE filings and ET, Business Standard and Mint RSS every 3 min, Google News every 10 min for our ~79 stocks; FinBERT tone; phone alert per stock for each new item (high for strongly negative or sensitive filings; max 30/h); archive `data/news/` copied to G:. Observe only. |
 | TitanQ_Preflight | 08:50 Mon-Fri | `alerts.py --preflight`: HTTPS to Yahoo, Angel and NSE (VPN check), mains power, disk space. Phone alert either way. |
 | TitanQ_Trends | 20:40 daily | `trends_collector.py`: Google Trends searches for "<company> share price" (held/planned stocks); daily 90-day snapshot to D: and G:. Observe only. |
 | TitanQ_Reddit | every 20 min, 07:05-00:05 | `reddit_collector.py`: official Reddit API if `reddit_credentials.json` exists (new apps need Reddit's approval), else ONE public RSS request per run, rotating over 3 subreddits; mentions and tone per stock. No disguised scraping. Observe only. Replaces the Selenium scraper `social_media_scanner.py`. |
