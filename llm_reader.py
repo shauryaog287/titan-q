@@ -168,11 +168,23 @@ def report() -> None:
     e = pd.read_parquet(path)
     e = e[~e["event_type"].isin(["routine", "market_commentary"])]
     order = {"high": 0, "medium": 1, "low": 2}
-    e = e.assign(m=e["materiality"].map(order)).sort_values(["m", "confidence"], ascending=[True, False])
-    print(f"{len(e)} company events today (routine and market commentary left out):")
-    for r in e.head(25).itertuples():
-        val = f" Rs. {r.value_cr:,.0f} cr" if pd.notna(r.value_cr) else ""
-        print(f"  {r.symbols:14s} {r.materiality:6s} {r.direction:8s} {r.event_type:20s}{val} | {r.summary}")
+    e = e.assign(m=e["materiality"].map(order))
+    # many outlets carry the same story: one line per stock and event type, with the count,
+    # the most material reading and the majority direction
+    rows = []
+    for (sym, et), g in e.groupby(["symbols", "event_type"]):
+        g = g.sort_values(["m", "confidence"], ascending=[True, False])
+        top = g.iloc[0]
+        rows.append({"symbols": sym, "event_type": et, "n": len(g), "m": top["m"],
+                     "materiality": top["materiality"], "direction": g["direction"].mode().iloc[0],
+                     "value_cr": g["value_cr"].dropna().max() if g["value_cr"].notna().any() else None,
+                     "summary": top["summary"]})
+    out = pd.DataFrame(rows).sort_values(["m", "n"], ascending=[True, False]) if rows else pd.DataFrame()
+    print(f"{len(e)} company items today in {len(out)} events (routine and market commentary left out):")
+    for r in out.head(25).itertuples():
+        val = f" Rs. {r.value_cr:,.0f} cr" if r.value_cr is not None and pd.notna(r.value_cr) else ""
+        print(f"  {r.symbols:14s} {r.materiality:6s} {r.direction:8s} {r.event_type:20s}{val} "
+              f"({r.n} item{'s' if r.n > 1 else ''}) | {r.summary}")
 
 
 def test() -> None:
@@ -185,7 +197,8 @@ def test() -> None:
     ]
     for s in samples:
         t0 = time.time()
-        print(f"{time.time() - t0:5.1f}s", read_item(s), "|", s[:70])
+        ev = read_item(s)
+        print(f"{time.time() - t0:5.1f}s", ev, "|", s[:70])
 
 
 if __name__ == "__main__":
