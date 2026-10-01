@@ -77,6 +77,8 @@ def _save_state(state: Dict) -> None:
 
 
 def _live_equity(close: pd.Series):
+    """The live paper account at `close` (pass last-available closes: a stock missing today's
+    Yahoo row, UPL.NS on 2026-10-01, was valued at nothing before)."""
     if not os.path.exists(LIVE_ACCOUNT_FILE):
         return None
     with open(LIVE_ACCOUNT_FILE, "r", encoding="ascii") as f:
@@ -158,6 +160,11 @@ def update(force: bool = False) -> None:
     first_run = not state["formations"]
     new_month = px.index[i].month != px.index[i - 1].month
     trades = 0
+    b = state["bench"]
+    if b:   # today's equal-weight return on the current basket first, then (new month) re-base;
+        # before 2026-10-01 the re-base came first and the rebalance day's return was skipped
+        rel = [float(close[s]) / p for s, p in b["entry"].items() if np.isfinite(close.get(s, np.nan))]
+        b["level"] = b["level0"] * float(np.mean(rel)) if rel else b["level"]
     if first_run or new_month:
         scores, eligible = composite_scores(px, vol, i - 1)       # data up to the previous close
         picks = scores.index[:TOP_N].tolist()
@@ -178,7 +185,7 @@ def update(force: bool = False) -> None:
            "holdings": len(broker.positions), "trades": trades,
            "fees_today": round(broker.fees_paid - fees_before, 2), "fees_total": round(broker.fees_paid, 2),
            "bench_ew_level": round(b["level"], 4), "nifty": round(float(px[INDEX_SYMBOL].iloc[i]), 2),
-           "live_v31_equity": _live_equity(close)}
+           "live_v31_equity": _live_equity(px.drop(columns=[INDEX_SYMBOL]).iloc[:i + 1].ffill().iloc[-1])}
     pd.DataFrame([row]).to_csv(LOG_FILE, mode="a", header=not os.path.exists(LOG_FILE), index=False)
     broker.save()
     _save_state(state)

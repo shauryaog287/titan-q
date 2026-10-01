@@ -66,3 +66,13 @@ The file is committed to git regularly, so each day's result carries a timestamp
     before also have the day's close.
   - The day is re-recorded if the data arrives before midnight. Otherwise the record simply
     skips it.
+- **2026-10-01:** two bookkeeping errors were corrected in the evening. The composite's own
+  equity and trades were right and were not changed.
+  - The equal-weight benchmark. On a rebalance day, `forward_test.py` re-based the benchmark
+    at that day's close BEFORE applying the day's return, so the first trading day of each
+    month was skipped. The 1 Oct level (the day the market fell) became 99.5846, unchanged.
+    Recomputed with the old basket's 1 Oct closes, it is 98.3300. The state now re-bases from
+    98.33, and the code applies the day's return before re-basing.
+  - The live account column. It valued the live v3 account only at stocks with a Yahoo close
+    that day, and UPL.NS (14 shares) had none on 1 Oct. That made the account look Rs. 7,557
+    poorer: 489,579.09 instead of 497,135.59. The code now uses the last available close.
