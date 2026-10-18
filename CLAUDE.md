@@ -47,9 +47,11 @@ The interpreter is always `D:\trader_env\Scripts\python.exe`, run from `D:\Quant
 
 ## Scheduled and unattended jobs (Windows Task Scheduler)
 
+**No visible windows (since 2026-10-18).** Every task runs through `pythonw.exe run_hidden.py <log> <script> [args]` (or pythonw directly). The old `cmd.exe /c ...` actions opened a console window on every run (every 20 min for Reddit), and closing one killed the job (exit 0xC000013A). Never use cmd.exe, a .bat or python.exe as a task action.
+
 | Task | When | What |
 |---|---|---|
-| TitanQ_Live_Trading | 09:10 daily | `start_titan_q.bat`: trading loop (under `run_live.py`), Angel recorder, dashboard. The .bat must end (no `pause`), or the next day's start is skipped. |
+| TitanQ_Live_Trading | 09:10 daily | `pythonw start_live_hidden.py`: starts the trading loop (under `run_live.py`), the Angel recorder and the dashboard (http://localhost:5000) with NO windows, only if not already running; console output in `logs\console_*.log`. `start_titan_q.bat` (visible windows) is for starting by hand only. |
 | TitanQ_Forward_Test | 16:30 Mon-Fri | `forward_test.py` fallback (the live loop also starts it after the close). Idempotent, locked. |
 | TitanQ_News | starts 07:30 (watchdog every 30 min) | `news_watch.py` runs until 21:35: NSE filings and ET, Business Standard and Mint RSS every 3 min, Google News every 10 min for our ~79 stocks; FinBERT tone; phone alert per stock for each new item (high for strongly negative or sensitive filings; max 30/h); archive `data/news/` copied to G:. Observe only. |
 | TitanQ_Preflight | 08:50 Mon-Fri | `alerts.py --preflight`: HTTPS to Yahoo, Angel and NSE (VPN check), mains power, disk space. Phone alert either way. |
