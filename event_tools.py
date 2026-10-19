@@ -85,13 +85,14 @@ class Panels:
         return "small" if v <= q1 else "mid" if v <= q2 else "large"
 
 
-def summary(x: pd.Series, dates: pd.Series) -> Dict:
-    """Mean, median, share > 0 and a month-clustered t of the values x (dates = event dates)."""
+def summary(x: pd.Series, dates: pd.Series, freq: str = "M") -> Dict:
+    """Mean, median, share > 0 and a t clustered by calendar month (freq "M") or week ("W")
+    of the values x (dates = event dates)."""
     ok = x.notna()
     x, dates = x[ok], pd.to_datetime(dates[ok])
     if len(x) < 2:
         return {"events": int(len(x))}
-    by = x.groupby(dates.dt.to_period("M")).mean()
+    by = x.groupby(dates.dt.to_period(freq)).mean()
     sd = by.std(ddof=1)
     return {"events": int(len(x)), "months": int(len(by)), "mean": float(x.mean()), "median": float(x.median()),
             "t": float(by.mean() / sd * math.sqrt(len(by))) if len(by) > 1 and sd > 0 else 0.0,
