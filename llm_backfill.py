@@ -12,7 +12,8 @@ reports/preregistration_ev1_ai_filings.md. Labels only: no returns are computed 
   filings already labelled are skipped.
 - Runs only on mains power (pauses while on battery) and keeps the laptop awake while
   working (lid closing still sleeps it).
-- Pauses 09:00-15:45 on weekdays so the live trading session has the machine to itself.
+- Runs during market hours too (since 2026-10-19), at below-normal CPU priority; the model runs
+  on the GPU, which the trading loop does not use.
 - About 1.3 s a filing on the RTX 3050.
 """
 
@@ -140,14 +141,24 @@ def keep_awake(on: bool) -> None:
 
 
 def may_run() -> Optional[str]:
-    """None if labelling may run now, else the reason to wait."""
+    """None if labelling may run now, else the reason to wait. Since 2026-10-19 it also runs
+    during market hours (the user's choice: two weeks gave only 2,000 of 41,437 labels); the
+    work is on the GPU, which the trading loop does not use, and this process runs at low
+    CPU priority (lower_priority)."""
     from alerts import on_battery
-    now = datetime.now()
-    if now.weekday() < 5 and dtime(9, 0) <= now.time() <= dtime(15, 45):
-        return "market hours"
     if on_battery():
         return "on battery"
     return None
+
+
+def lower_priority() -> None:
+    """Below-normal CPU priority for this process, so the live trading processes come first."""
+    try:
+        BELOW_NORMAL = 0x00004000
+        h = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.kernel32.SetPriorityClass(h, BELOW_NORMAL)
+    except Exception:
+        pass
 
 
 def save(path: str, rows: List[Dict]) -> None:
@@ -160,6 +171,7 @@ def save(path: str, rows: List[Dict]) -> None:
 
 def run(window: str) -> None:
     from llm_reader import EVENT_TYPES
+    lower_priority()
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, f"ev1_{window}.parquet")
     todo = in_scope(window)
