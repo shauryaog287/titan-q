@@ -29,6 +29,7 @@ class Panels:
         liq = (med60 >= MIN_VALUE) & (P.shift(1) >= MIN_PRICE) & (P.shift(1).notna().cumsum() >= MIN_HIST)
         self.days = P.index
         self.P, self.F = P.to_numpy(), P.ffill().to_numpy()
+        self.VAL = (P * V).to_numpy()                       # daily traded value (Rs.)
         self.L, self.M = liq.to_numpy(), med60.to_numpy()
         self.col = {s: i for i, s in enumerate(stocks)}
         uni = load_universe()
@@ -59,6 +60,17 @@ class Panels:
             r = self.F[exit_, pool] / self.P[entry, pool] - 1
         r = r[np.isfinite(r)]
         return float(r_s - r.mean()) if np.isfinite(r_s) and len(r) else float("nan")
+
+    def new_listing_liquid(self, first_row: int, entry: int, yahoo: str, min_days: int = 10) -> bool:
+        """For recent IPOs (no 250-day history): median traded value from `first_row` to the
+        day before `entry` >= Rs. 1 crore over >= min_days days, and entry close >= Rs. 20."""
+        j = self.col.get(yahoo)
+        if j is None or entry <= first_row or entry >= len(self.days):
+            return False
+        v = self.VAL[first_row:entry, j]
+        v = v[np.isfinite(v)]
+        px = self.P[entry, j]
+        return len(v) >= min_days and float(np.median(v)) >= MIN_VALUE and np.isfinite(px) and px >= MIN_PRICE
 
     def size_third(self, row: int, yahoo: str) -> str:
         j = self.col.get(yahoo)
