@@ -112,12 +112,51 @@ def trades(bm: pd.DataFrame, tools) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def eap1b_confirmation() -> None:
+    """reports/preregistration_eap1b_pre_results_runup.md: one run on meetings 2021-01 to 2026-08."""
+    from event_tools import HEAD, Panels, line, summary
+    tools = Panels()
+    bm = results_meetings("2021-01-01", "2026-08-31")
+    ev = trades(bm, tools)
+    ev = ev[ev["pre"].notna()].copy()
+    ev["pre_net"] = ev["pre"] - COST
+    s = summary(ev["pre_net"], ev["entry_date"])
+    ok = s.get("events", 0) > 1 and s["mean"] > 0 and s["t"] >= 2.0
+
+    def sub(mask):
+        return summary(ev.loc[mask, "pre_net"], ev.loc[mask, "entry_date"])
+    L = ["# EAP1b: the pre-results run-up, confirmation on meetings 2021-01 to 2026-08 (run once)", "",
+         "Implements reports/preregistration_eap1b_pre_results_runup.md. Entry as EAP1 (the later of the day the "
+         "meeting date became public and 5 trading days before it); exit at the close of the last trading day "
+         "before the meeting. Result = stock minus the equal-weight liquid universe, minus 0.50% cost. "
+         f"{len(bm):,} results meetings announced in advance; {len(ev):,} trades in liquid stocks.", ""] + HEAD + [
+         line("**Net result per trade (decisive)**", s), "",
+         "Rule: mean net > 0 and month t >= 2.0.", "",
+         f"**Decision: {'confirmed; observe-mode list, then a pre-registered shadow paper strategy' if ok else 'not confirmed; nothing changes'}.**",
+         "", "## Also reported (not part of the decision)", ""] + HEAD + [
+         line("Gross (no cost)", summary(ev["pre"], ev["entry_date"])),
+         line("Small third (net)", sub(ev["size"] == "small")),
+         line("Mid third (net)", sub(ev["size"] == "mid")),
+         line("Large third (net)", sub(ev["size"] == "large")),
+         line("Date announced > 7 days ahead (net)", sub(ev["lead_days"] > 7)),
+         line("Date announced <= 7 days ahead (net)", sub(ev["lead_days"] <= 7)), ""]
+    with open(os.path.join(REPORT_DIR, "pre_results_runup.md"), "w", encoding="ascii") as f:
+        f.write("\n".join(L) + "\n")
+    with open(os.path.join(REPORT_DIR, "pre_results_runup.json"), "w", encoding="ascii") as f:
+        json.dump({"confirmation": s, "confirmed": ok, "trades": int(len(ev))}, f, indent=2)
+    print("\n".join(L))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fetch", action="store_true")
+    ap.add_argument("--eap1b-confirmation", action="store_true")
     a = ap.parse_args()
     if a.fetch:
         fetch()
+        return
+    if a.eap1b_confirmation:
+        eap1b_confirmation()
         return
     from event_tools import HEAD, Panels, line, summary
     tools = Panels()
