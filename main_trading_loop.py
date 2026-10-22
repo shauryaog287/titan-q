@@ -116,7 +116,9 @@ def start_forward_test() -> None:
     import sys
     try:
         out = open(os.path.join(LOGS_DIR, datetime.now().strftime("forward_test_%Y-%m-%d.log")), "a")
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        # hidden console (CREATE_NO_WINDOW) in its own process group; DETACHED_PROCESS made the
+        # venv launcher open a visible window for the whole update
+        flags = 0x08000000 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         subprocess.Popen([sys.executable, os.path.join(PROJECT_DIR, "forward_test.py")], cwd=PROJECT_DIR,
                          stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
         log.info("forward-test update started (log: logs\\forward_test_%s.log)", datetime.now().strftime("%Y-%m-%d"))

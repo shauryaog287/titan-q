@@ -60,7 +60,8 @@ def _supervise() -> None:
     while True:
         t0 = time.time()
         log.info("starting main_trading_loop.py (run %d)", restarts + 1)
-        rc = subprocess.call([sys.executable, LOOP], cwd=PROJECT_DIR)
+        # CREATE_NO_WINDOW: a hidden console even if this supervisor has none (no window pops up)
+        rc = subprocess.call([sys.executable, LOOP], cwd=PROJECT_DIR, creationflags=0x08000000)
         now = now_ist()
         end = session.bounds(now.date())[1] + timedelta(minutes=15)
         log.info("main_trading_loop.py exited with code %d after %.0f s", rc, time.time() - t0)

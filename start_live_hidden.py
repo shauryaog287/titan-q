@@ -18,6 +18,8 @@ system mid-session. start_titan_q.bat is kept for starting by hand with visible 
 
 The processes are started outside the scheduled task's job object where Windows allows it
 (CREATE_BREAKAWAY_FROM_JOB) and unbuffered (-u), so their console logs show why one stopped.
+They get a hidden console (CREATE_NO_WINDOW), not none: with DETACHED_PROCESS (2026-10-19 to 22)
+every console program they started, such as the trading loop under run_live.py, opened a visible window.
 A dashboard started by the task died within minutes twice (2026-10-18 and 10-19) while one
 started directly kept running; TitanQ_Dashboard (--dashboard, every 15 minutes and at logon)
 restarts it if it is down.
@@ -59,9 +61,9 @@ def main() -> None:
         kw = dict(cwd=PROJECT, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                   env=dict(os.environ, PYTHONIOENCODING="ascii:replace"), close_fds=True)
         try:
-            subprocess.Popen(args, creationflags=CREATE_NO_WINDOW | DETACHED | NEW_GROUP | BREAKAWAY, **kw)
+            subprocess.Popen(args, creationflags=CREATE_NO_WINDOW | NEW_GROUP | BREAKAWAY, **kw)
         except OSError:                    # the job does not allow breakaway: start inside it
-            subprocess.Popen(args, creationflags=CREATE_NO_WINDOW | DETACHED | NEW_GROUP, **kw)
+            subprocess.Popen(args, creationflags=CREATE_NO_WINDOW | NEW_GROUP, **kw)
 
 
 if __name__ == "__main__":
